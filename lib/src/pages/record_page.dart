@@ -7,6 +7,7 @@ import '../database.dart';
 import '../models.dart';
 import '../utils.dart';
 import '../widgets/dialogs.dart';
+import '../widgets/session_set_table.dart';
 
 class RecordPage extends StatefulWidget {
   const RecordPage({super.key});
@@ -24,11 +25,11 @@ class _RecordPageState extends State<RecordPage> {
   List<WorkoutSet> _sets = [];
   RecordingMode _mode = RecordingMode.idle;
   int? _sessionId;
+  int? _currentSetId;
   int? _currentRouteId;
   int _targetRestSeconds = 180;
   DateTime? _phaseStartedAt;
   DateTime? _lastRestStartedAt;
-  int? _lastSetId;
 
   @override
   void initState() {
@@ -69,23 +70,37 @@ class _RecordPageState extends State<RecordPage> {
       startedAt: DateTime.now(),
       targetRestSeconds: setup.targetRestSeconds,
     ));
+    final now = DateTime.now();
+    final setId = await db.insertSet(WorkoutSet(
+      sessionId: sessionId,
+      routeId: routeId,
+      setNumber: 1,
+      startedAt: now,
+      endedAt: null,
+      wallTimeSeconds: 0,
+      restAfterSeconds: null,
+      targetRestSeconds: setup.targetRestSeconds,
+      movesCompleted: 0,
+    ));
+    final sets = await db.setsForSession(sessionId);
     setState(() {
       _sessionId = sessionId;
+      _currentSetId = setId;
       _currentRouteId = routeId;
       _targetRestSeconds = setup.targetRestSeconds;
-      _sets = [];
+      _sets = sets;
       _mode = RecordingMode.climbing;
-      _phaseStartedAt = DateTime.now();
+      _phaseStartedAt = now;
       _lastRestStartedAt = null;
-      _lastSetId = null;
     });
   }
 
   Future<void> _finishClimb() async {
     final sessionId = _sessionId;
+    final currentSetId = _currentSetId;
     final routeId = _currentRouteId;
     final startedAt = _phaseStartedAt;
-    if (sessionId == null || routeId == null || startedAt == null) return;
+    if (sessionId == null || currentSetId == null || routeId == null || startedAt == null) return;
 
     final elapsed = math.max(1, DateTime.now().difference(startedAt).inSeconds);
     final entry = await showDialog<SetEntryResult>(
@@ -105,10 +120,11 @@ class _RecordPageState extends State<RecordPage> {
         ));
     await _loadRoutes();
     final now = DateTime.now();
-    final set = WorkoutSet(
+    await db.updateSet(WorkoutSet(
+      id: currentSetId,
       sessionId: sessionId,
       routeId: routeId,
-      setNumber: _sets.length + 1,
+      setNumber: _sets.length,
       startedAt: startedAt,
       endedAt: now,
       wallTimeSeconds: elapsed,
@@ -116,8 +132,7 @@ class _RecordPageState extends State<RecordPage> {
       targetRestSeconds: _targetRestSeconds,
       movesCompleted: entry.movesCompleted,
       notes: entry.notes,
-    );
-    final setId = await db.insertSet(set);
+    ));
     final updated = await db.setsForSession(sessionId);
     setState(() {
       _sets = updated;
@@ -125,52 +140,50 @@ class _RecordPageState extends State<RecordPage> {
       _mode = RecordingMode.resting;
       _phaseStartedAt = now;
       _lastRestStartedAt = now;
-      _lastSetId = setId;
     });
   }
 
   Future<void> _startNextSet() async {
+    final sessionId = _sessionId;
+    final routeId = _currentRouteId;
+    if (sessionId == null || routeId == null) return;
+
     final restStartedAt = _lastRestStartedAt;
-    final lastSetId = _lastSetId;
-    var sets = _sets;
-    if (restStartedAt != null && lastSetId != null) {
-      await db.updateRestAfter(
-        lastSetId,
-        DateTime.now().difference(restStartedAt).inSeconds,
-      );
-      if (_sessionId != null) {
-        sets = await db.setsForSession(_sessionId!);
-      }
-    }
+    final restSeconds = restStartedAt == null ? null : DateTime.now().difference(restStartedAt).inSeconds;
+    final now = DateTime.now();
+    final setId = await db.insertSet(WorkoutSet(
+      sessionId: sessionId,
+      routeId: routeId,
+      setNumber: _sets.length + 1,
+      startedAt: now,
+      endedAt: null,
+      wallTimeSeconds: 0,
+      restAfterSeconds: restSeconds,
+      targetRestSeconds: _targetRestSeconds,
+      movesCompleted: 0,
+    ));
+    final sets = await db.setsForSession(sessionId);
     setState(() {
       _sets = sets;
+      _currentSetId = setId;
       _mode = RecordingMode.climbing;
-      _phaseStartedAt = DateTime.now();
+      _phaseStartedAt = now;
       _lastRestStartedAt = null;
-      _lastSetId = null;
     });
   }
 
   Future<void> _endWorkout() async {
     final id = _sessionId;
     if (id == null) return;
-    if (_mode == RecordingMode.resting &&
-        _lastRestStartedAt != null &&
-        _lastSetId != null) {
-      await db.updateRestAfter(
-        _lastSetId!,
-        DateTime.now().difference(_lastRestStartedAt!).inSeconds,
-      );
-    }
     await db.endSession(id);
     setState(() {
       _mode = RecordingMode.idle;
       _sessionId = null;
+      _currentSetId = null;
       _currentRouteId = null;
       _sets = [];
       _phaseStartedAt = null;
       _lastRestStartedAt = null;
-      _lastSetId = null;
     });
   }
 
@@ -219,10 +232,12 @@ class _RecordPageState extends State<RecordPage> {
           ),
         const SizedBox(height: 16),
         if (_mode == RecordingMode.resting || _sets.isNotEmpty)
-          _WorkoutSetTable(
+          SessionSetTable(
             sets: _sets,
             routes: _routes,
-            onEdit: _editSet,
+            onChanged: _updateSet,
+            onDelete: _deleteSet,
+            onAdd: _addSet,
           ),
       ],
     );
@@ -238,16 +253,63 @@ class _RecordPageState extends State<RecordPage> {
     await _loadRoutes();
   }
 
-  Future<void> _editSet(WorkoutSet set) async {
-    final edited = await showDialog<WorkoutSet>(
-      context: context,
-      builder: (_) => EditSetDialog(set: set, routes: _routes),
-    );
-    if (edited == null) return;
-    await db.updateSet(edited);
+  Future<void> _updateSet(WorkoutSet set) async {
+    await db.updateSet(set);
     if (_sessionId != null) {
       final sets = await db.setsForSession(_sessionId!);
       setState(() => _sets = sets);
+    }
+  }
+
+  Future<void> _addSet() async {
+    if (_sessionId == null || _routes.isEmpty) return;
+    final routeId = _routes.first.id!;
+    final setCount = _sets.length;
+    final newSet = WorkoutSet(
+      sessionId: _sessionId!,
+      routeId: routeId,
+      setNumber: setCount + 1,
+      startedAt: DateTime.now(),
+      endedAt: DateTime.now(),
+      wallTimeSeconds: 0,
+      restAfterSeconds: null,
+      targetRestSeconds: _targetRestSeconds,
+      movesCompleted: 0,
+    );
+    await db.insertSet(newSet);
+    await _renumberSets(_sessionId!);
+    final sets = await db.setsForSession(_sessionId!);
+    setState(() => _sets = sets);
+  }
+
+  Future<void> _deleteSet(int setId) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Delete set'),
+        content: const Text('Remove this set from the current workout?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+    await db.deleteSet(setId);
+    if (_sessionId != null) {
+      await _renumberSets(_sessionId!);
+      final sets = await db.setsForSession(_sessionId!);
+      setState(() => _sets = sets);
+    }
+  }
+
+  Future<void> _renumberSets(int sessionId) async {
+    final sets = await db.setsForSession(sessionId);
+    for (var i = 0; i < sets.length; i++) {
+      final desired = i + 1;
+      if (sets[i].setNumber != desired) {
+        await db.updateSet(sets[i].copyWith(setNumber: desired));
+      }
     }
   }
 }
@@ -373,62 +435,3 @@ class _ActivePanel extends StatelessWidget {
   }
 }
 
-class _WorkoutSetTable extends StatelessWidget {
-  const _WorkoutSetTable({
-    required this.sets,
-    required this.routes,
-    required this.onEdit,
-  });
-
-  final List<WorkoutSet> sets;
-  final List<RouteEntry> routes;
-  final ValueChanged<WorkoutSet> onEdit;
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Current workout', style: Theme.of(context).textTheme.titleMedium),
-            const SizedBox(height: 8),
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: DataTable(
-                columns: const [
-                  DataColumn(label: Text('Set')),
-                  DataColumn(label: Text('Route')),
-                  DataColumn(label: Text('Moves')),
-                  DataColumn(label: Text('Wall')),
-                  DataColumn(label: Text('Rest')),
-                  DataColumn(label: Text('Speed')),
-                  DataColumn(label: Text('')),
-                ],
-                rows: sets.map((set) {
-                  final route = firstWhereOrNull(routes, (r) => r.id == set.routeId);
-                  return DataRow(cells: [
-                    DataCell(Text('${set.setNumber}')),
-                    DataCell(Text(route?.name ?? 'Route')),
-                    DataCell(Text('${set.movesCompleted}')),
-                    DataCell(Text(formatDuration(set.wallTimeSeconds))),
-                    DataCell(Text(set.restAfterSeconds == null
-                        ? '...'
-                        : formatDuration(set.restAfterSeconds!))),
-                    DataCell(Text(set.movesPerMinute.toStringAsFixed(1))),
-                    DataCell(IconButton(
-                      tooltip: 'Edit set',
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => onEdit(set),
-                    )),
-                  ]);
-                }).toList(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

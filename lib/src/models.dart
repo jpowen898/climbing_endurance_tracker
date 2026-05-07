@@ -109,9 +109,9 @@ class WorkoutSet {
     required this.routeId,
     required this.setNumber,
     required this.startedAt,
-    required this.endedAt,
+    this.endedAt,
     required this.wallTimeSeconds,
-    required this.restAfterSeconds,
+    this.restAfterSeconds,
     required this.targetRestSeconds,
     required this.movesCompleted,
     this.notes = '',
@@ -122,7 +122,7 @@ class WorkoutSet {
   final int routeId;
   final int setNumber;
   final DateTime startedAt;
-  final DateTime endedAt;
+  final DateTime? endedAt;
   final int wallTimeSeconds;
   final int? restAfterSeconds;
   final int targetRestSeconds;
@@ -138,7 +138,7 @@ class WorkoutSet {
         'route_id': routeId,
         'set_number': setNumber,
         'started_at': startedAt.millisecondsSinceEpoch,
-        'ended_at': endedAt.millisecondsSinceEpoch,
+        'ended_at': endedAt?.millisecondsSinceEpoch,
         'wall_time_seconds': wallTimeSeconds,
         'rest_after_seconds': restAfterSeconds,
         'target_rest_seconds': targetRestSeconds,
@@ -152,7 +152,9 @@ class WorkoutSet {
         routeId: map['route_id'] as int,
         setNumber: map['set_number'] as int,
         startedAt: DateTime.fromMillisecondsSinceEpoch(map['started_at'] as int),
-        endedAt: DateTime.fromMillisecondsSinceEpoch(map['ended_at'] as int),
+        endedAt: map['ended_at'] == null
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(map['ended_at'] as int),
         wallTimeSeconds: map['wall_time_seconds'] as int,
         restAfterSeconds: map['rest_after_seconds'] as int?,
         targetRestSeconds: map['target_rest_seconds'] as int,

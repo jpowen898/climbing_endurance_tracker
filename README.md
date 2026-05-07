@@ -14,26 +14,109 @@ A local-first Flutter app for recording spray wall endurance sessions.
 
 ## Run
 
-Install Flutter, then from this directory:
+### Prerequisites
+
+- Install Flutter and Android SDK.
+- Ensure `flutter doctor` reports no critical errors.
+- From this repository root, install Dart/Flutter packages:
 
 ```bash
-flutter create --platforms=android,ios .
 flutter pub get
 ```
 
-### Testing with Emulator
+### Build the App
 
-1. (Optional) Build the app: `flutter build apk` (this creates a debug APK; `flutter run` will build automatically if needed)
-2. List available emulators: `flutter emulators`
-3. Launch an emulator: `flutter emulators --launch <emulator_id>` (replace `<emulator_id>` with the ID from step 2, e.g., `flutter emulators --launch Pixel_8_API_34`)
-4. Run the app on the emulator: `flutter run` (select the running emulator when prompted)
+To build for Android:
 
-### Building and Installing on Android Phone
+```bash
+flutter build apk --release
+```
 
-1. On your Android phone, enable Developer Options and USB debugging.
-2. Connect the phone to your computer via USB.
-3. Verify the device is recognized: `adb devices`
-4. Build the APK: `flutter build apk --release`
-5. Install on device: `flutter install --release`
+To build a debug APK for quick testing:
 
-On a Pixel 8, enable Developer Options and USB debugging, connect the phone, then select it as the run target when running `flutter run`.
+```bash
+flutter build apk --debug
+```
+
+### Test with Emulator
+
+1. List available emulators:
+
+```bash
+flutter emulators
+```
+
+2. Launch one:
+
+```bash
+flutter emulators --launch <emulator_id>
+```
+
+3. Confirm the emulator is available:
+
+```bash
+flutter devices
+```
+
+4. Run the app on the emulator:
+
+```bash
+flutter run
+```
+
+The app will install and launch on the active emulator.
+
+### Test on Android Device with ADB
+
+1. Enable Developer Options on the phone.
+2. Turn on USB debugging.
+3. Connect the phone to your computer via USB.
+4. Verify the device is connected:
+
+```bash
+adb devices
+```
+
+5. Build the APK:
+
+```bash
+flutter build apk --debug
+```
+
+6. Install the APK on the device:
+
+```bash
+adb install -r build/app/outputs/flutter-apk/app-debug.apk
+```
+
+7. Launch from the phone or use:
+
+```bash
+adb shell am start -n com.example.climb_endurance/com.example.climb_endurance.MainActivity
+```
+
+### Install Directly on an Android Device
+
+Once the release APK is built:
+
+```bash
+flutter build apk --release
+```
+
+Then install it directly with ADB:
+
+```bash
+adb install -r build/app/outputs/flutter-apk/app-release.apk
+```
+
+If the device is already connected, you can also use Flutter directly:
+
+```bash
+flutter install --release
+```
+
+or, to run immediately on the connected device:
+
+```bash
+flutter run --release
+```

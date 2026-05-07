@@ -78,6 +78,21 @@ class ClimbDatabase {
     return route.id!;
   }
 
+  Future<int> getOrCreateRoute(String name, {String wall = '', String notes = '', int? holdCount}) async {
+    final existing = await (await db).query('routes', where: 'name = ?', whereArgs: [name], limit: 1);
+    if (existing.isNotEmpty) {
+      return RouteEntry.fromMap(existing.first).id!;
+    }
+    final route = RouteEntry(
+      name: name,
+      wall: wall,
+      notes: notes,
+      holdCount: holdCount,
+      createdAt: DateTime.now(),
+    );
+    return upsertRoute(route);
+  }
+
   Future<void> deleteRoute(int id) async {
     await (await db).delete('routes', where: 'id = ?', whereArgs: [id]);
   }

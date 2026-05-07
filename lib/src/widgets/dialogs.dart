@@ -134,6 +134,111 @@ class _SessionDialogState extends State<SessionDialog> {
   }
 }
 
+class NewSessionDialog extends StatefulWidget {
+  const NewSessionDialog({super.key});
+
+  @override
+  State<NewSessionDialog> createState() => _NewSessionDialogState();
+}
+
+class _NewSessionDialogState extends State<NewSessionDialog> {
+  DateTime startedAt = DateTime.now();
+  final restDuration = TextEditingController(text: '8:00');
+  final notes = TextEditingController();
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: startedAt,
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now().add(const Duration(days: 365)),
+    );
+    if (picked == null) return;
+    setState(() {
+      startedAt = DateTime(
+        picked.year,
+        picked.month,
+        picked.day,
+        startedAt.hour,
+        startedAt.minute,
+      );
+    });
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(startedAt),
+    );
+    if (picked == null) return;
+    setState(() {
+      startedAt = DateTime(
+        startedAt.year,
+        startedAt.month,
+        startedAt.day,
+        picked.hour,
+        picked.minute,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('New session'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: FilledButton(
+                  onPressed: _pickDate,
+                  child: Text(dateFormat.format(startedAt)),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: FilledButton(
+                  onPressed: _pickTime,
+                  child: Text(TimeOfDay.fromDateTime(startedAt).format(context)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: restDuration,
+            keyboardType: TextInputType.datetime,
+            decoration: const InputDecoration(labelText: 'Target rest duration', hintText: 'm:ss'),
+          ),
+          TextField(
+            controller: notes,
+            decoration: const InputDecoration(labelText: 'Notes'),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            final seconds = parseDuration(restDuration.text) ?? 480;
+            Navigator.pop(
+              context,
+              WorkoutSession(
+                startedAt: startedAt,
+                targetRestSeconds: seconds,
+                notes: notes.text.trim(),
+              ),
+            );
+          },
+          child: const Text('Create'),
+        ),
+      ],
+    );
+  }
+}
+
 class WorkoutSetupDialog extends StatefulWidget {
   const WorkoutSetupDialog({super.key, required this.routes});
 
@@ -146,7 +251,7 @@ class WorkoutSetupDialog extends StatefulWidget {
 class _WorkoutSetupDialogState extends State<WorkoutSetupDialog> {
   int? routeId;
   final newRoute = TextEditingController();
-  final restMinutes = TextEditingController(text: '3');
+  final restDuration = TextEditingController(text: '8:00');
 
   @override
   void initState() {
@@ -179,9 +284,9 @@ class _WorkoutSetupDialogState extends State<WorkoutSetupDialog> {
               decoration: const InputDecoration(labelText: 'New route name'),
             ),
           TextField(
-            controller: restMinutes,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(labelText: 'Target rest minutes'),
+            controller: restDuration,
+            keyboardType: TextInputType.datetime,
+            decoration: const InputDecoration(labelText: 'Target rest duration', hintText: 'm:ss'),
           ),
         ],
       ),
@@ -189,14 +294,14 @@ class _WorkoutSetupDialogState extends State<WorkoutSetupDialog> {
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         FilledButton(
           onPressed: () {
-            final minutes = double.tryParse(restMinutes.text) ?? 3;
+            final seconds = parseDuration(restDuration.text) ?? 480;
             if (routeId == null && newRoute.text.trim().isEmpty) return;
             Navigator.pop(
               context,
               WorkoutSetupResult(
                 routeId: routeId,
                 newRouteName: routeId == null ? newRoute.text.trim() : null,
-                targetRestSeconds: (minutes * 60).round(),
+                targetRestSeconds: seconds,
               ),
             );
           },

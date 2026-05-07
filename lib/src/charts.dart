@@ -46,58 +46,173 @@ class TrendChart extends StatelessWidget {
     required this.sets,
     required this.yValue,
     required this.label,
+    this.multiLine = false,
+    this.includePoint,
   });
 
   final List<SetWithRoute> sets;
   final double Function(SetWithRoute item) yValue;
   final String label;
+  final bool multiLine;
+  final bool Function(SetWithRoute item)? includePoint;
 
   @override
   Widget build(BuildContext context) {
-    if (sets.isEmpty) return const Center(child: Text('No data yet'));
-    final sessionDates = sets.map((s) => s.sessionStartedAt).toSet().toList()..sort();
+    final filteredSets = includePoint == null
+        ? sets
+        : sets.where(includePoint!).toList();
+    if (filteredSets.isEmpty) return const Center(child: Text('No data yet'));
+    final sessionDates = filteredSets.map((s) => s.sessionStartedAt).toSet().toList()..sort();
     final sessionIndex = {for (var i = 0; i < sessionDates.length; i++) sessionDates[i]: i.toDouble()};
-    final spots = <FlSpot>[];
-    for (final set in sets) {
-      spots.add(FlSpot(sessionIndex[set.sessionStartedAt]!, yValue(set)));
+    final labelIndices = <int>{};
+    if (sessionDates.length <= 4) {
+      labelIndices.addAll(List.generate(sessionDates.length, (i) => i));
+    } else {
+      for (var i = 0; i < 4; i++) {
+        labelIndices.add(((i * (sessionDates.length - 1)) / 3).round());
+      }
     }
-    spots.sort((a, b) => a.x.compareTo(b.x));
-    return LineChart(
-      LineChartData(
-        minY: 0,
-        gridData: const FlGridData(show: true),
-        titlesData: FlTitlesData(
-          topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-          bottomTitles: AxisTitles(
-            sideTitles: SideTitles(
-              showTitles: true,
-              reservedSize: 60,
-              getTitlesWidget: (value, meta) {
-                final index = value.toInt();
-                if (index >= 0 && index < sessionDates.length) {
-                  return Text(shortDate.format(sessionDates[index]), style: const TextStyle(fontSize: 10));
-                }
-                return const Text('');
-              },
+
+    if (!multiLine) {
+      final spots = <FlSpot>[];
+      for (final set in filteredSets) {
+        spots.add(FlSpot(sessionIndex[set.sessionStartedAt]!, yValue(set)));
+      }
+      spots.sort((a, b) => a.x.compareTo(b.x));
+      if (spots.isEmpty) return const Center(child: Text('No data yet'));
+      return Column(
+        children: [
+          Expanded(
+            child: LineChart(
+              LineChartData(
+                minY: 0,
+                gridData: const FlGridData(show: true),
+                titlesData: FlTitlesData(
+                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 60,
+                      getTitlesWidget: (value, meta) {
+                        final index = value.toInt();
+                        if (index >= 0 && index < sessionDates.length && labelIndices.contains(index)) {
+                          return Text(shortDate.format(sessionDates[index]), style: const TextStyle(fontSize: 10));
+                        }
+                        return const Text('');
+                      },
+                    ),
+                  ),
+                  leftTitles: AxisTitles(
+                    axisNameWidget: Text(label),
+                    sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
+                  ),
+                ),
+                borderData: FlBorderData(show: false),
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: true,
+                    barWidth: 3,
+                    dotData: const FlDotData(show: true),
+                    color: Theme.of(context).colorScheme.primary,
+                  ),
+                ],
+              ),
             ),
           ),
-          leftTitles: AxisTitles(
-            axisNameWidget: Text(label),
-            sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
+        ],
+      );
+    }
+
+    // Multi-line mode: group by set number
+    final bySetNumber = <int, List<SetWithRoute>>{};
+    for (final item in filteredSets) {
+      bySetNumber.putIfAbsent(item.set.setNumber, () => []).add(item);
+    }
+    final maxSetNumber = bySetNumber.keys.reduce((a, b) => a > b ? a : b);
+    final colors = [
+      Theme.of(context).colorScheme.primary,
+      Theme.of(context).colorScheme.secondary,
+      Theme.of(context).colorScheme.tertiary,
+      Colors.red,
+      Colors.green,
+      Colors.blue,
+      Colors.orange,
+      Colors.purple,
+      Colors.pink,
+      Colors.teal,
+    ];
+    final lineBarsData = <LineChartBarData>[];
+    final legendItems = <Widget>[];
+
+    for (var setNum = 1; setNum <= maxSetNumber; setNum++) {
+      final setItems = bySetNumber[setNum] ?? [];
+      if (setItems.isEmpty) continue;
+      final spots = <FlSpot>[];
+      for (final item in setItems) {
+        spots.add(FlSpot(sessionIndex[item.sessionStartedAt]!, yValue(item)));
+      }
+      spots.sort((a, b) => a.x.compareTo(b.x));
+      final color = colors[(setNum - 1) % colors.length];
+      lineBarsData.add(LineChartBarData(
+        spots: spots,
+        isCurved: true,
+        barWidth: 3,
+        dotData: const FlDotData(show: true),
+        color: color,
+      ));
+      legendItems.add(Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(width: 12, height: 12, color: color),
+          const SizedBox(width: 4),
+          Text('Set $setNum'),
+        ],
+      ));
+    }
+
+    if (lineBarsData.isEmpty) return const Center(child: Text('No data yet'));
+    return Column(
+      children: [
+        Expanded(
+          child: LineChart(
+            LineChartData(
+              minY: 0,
+              gridData: const FlGridData(show: true),
+              titlesData: FlTitlesData(
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 60,
+                    getTitlesWidget: (value, meta) {
+                      final index = value.toInt();
+                      if (index >= 0 && index < sessionDates.length && labelIndices.contains(index)) {
+                        return Text(shortDate.format(sessionDates[index]), style: const TextStyle(fontSize: 10));
+                      }
+                      return const Text('');
+                    },
+                  ),
+                ),
+                leftTitles: AxisTitles(
+                  axisNameWidget: Text(label),
+                  sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              lineBarsData: lineBarsData,
+            ),
           ),
         ),
-        borderData: FlBorderData(show: false),
-        lineBarsData: [
-          LineChartBarData(
-            spots: spots,
-            isCurved: true,
-            barWidth: 3,
-            dotData: const FlDotData(show: true),
-            color: Theme.of(context).colorScheme.primary,
-          ),
-        ],
-      ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 16,
+          runSpacing: 4,
+          children: legendItems,
+        ),
+      ],
     );
   }
 }
