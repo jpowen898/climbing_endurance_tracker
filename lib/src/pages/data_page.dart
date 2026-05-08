@@ -16,6 +16,7 @@ class _DataPageState extends State<DataPage> {
   final db = ClimbDatabase.instance;
   List<RouteEntry> _routes = [];
   List<SetWithRoute> _sets = [];
+  List<WorkoutSession> _sessions = [];
   int? _routeId;
   DateTimeRange _dateRange = DateTimeRange(
     start: DateTime.now().subtract(const Duration(days: 30)),
@@ -30,13 +31,22 @@ class _DataPageState extends State<DataPage> {
 
   Future<void> _load() async {
     final routes = await db.routes();
+    final sessions = await db.sessions();
     final sets = await db.allSets();
     if (!mounted) return;
     setState(() {
       _routes = routes;
+      _sessions = sessions;
       _sets = sets.reversed.toList();
       _routeId ??= routes.isEmpty ? null : routes.first.id;
     });
+  }
+
+  List<WorkoutSession> get _filteredSessions {
+    return _sessions.where((session) {
+      return session.startedAt.isAfter(_dateRange.start.subtract(const Duration(days: 1))) &&
+             session.startedAt.isBefore(_dateRange.end.add(const Duration(days: 1)));
+    }).toList();
   }
 
   List<SetWithRoute> get _filteredSets {
@@ -51,6 +61,7 @@ class _DataPageState extends State<DataPage> {
     final filtered = _routeId == null
         ? _filteredSets
         : _filteredSets.where((item) => item.set.routeId == _routeId).toList();
+    final sessionDates = _filteredSessions.map((s) => s.startedAt).toSet().toList()..sort();
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -82,6 +93,7 @@ class _DataPageState extends State<DataPage> {
             title: 'Moves over time',
             child: TrendChart(
               sets: filtered,
+              sessionDates: sessionDates,
               yValue: (item) => item.set.movesCompleted.toDouble(),
               label: 'moves',
               multiLine: true,
@@ -92,6 +104,7 @@ class _DataPageState extends State<DataPage> {
             title: 'Speed over time',
             child: TrendChart(
               sets: filtered,
+              sessionDates: sessionDates,
               yValue: (item) => item.set.movesPerMinute,
               label: 'moves/min',
               multiLine: true,
@@ -103,6 +116,7 @@ class _DataPageState extends State<DataPage> {
             title: 'Wall time over time',
             child: TrendChart(
               sets: filtered,
+              sessionDates: sessionDates,
               yValue: (item) => item.set.wallTimeSeconds.toDouble(),
               label: 'seconds',
               multiLine: true,
@@ -114,6 +128,7 @@ class _DataPageState extends State<DataPage> {
             title: 'Rest time over time',
             child: TrendChart(
               sets: filtered,
+              sessionDates: sessionDates,
               yValue: (item) => item.set.restAfterSeconds?.toDouble() ?? 0,
               label: 'seconds',
               multiLine: true,

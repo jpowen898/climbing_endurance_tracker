@@ -44,6 +44,7 @@ class TrendChart extends StatelessWidget {
   const TrendChart({
     super.key,
     required this.sets,
+    required this.sessionDates,
     required this.yValue,
     required this.label,
     this.multiLine = false,
@@ -51,6 +52,7 @@ class TrendChart extends StatelessWidget {
   });
 
   final List<SetWithRoute> sets;
+  final List<DateTime> sessionDates;
   final double Function(SetWithRoute item) yValue;
   final String label;
   final bool multiLine;
@@ -61,9 +63,10 @@ class TrendChart extends StatelessWidget {
     final filteredSets = includePoint == null
         ? sets
         : sets.where(includePoint!).toList();
-    if (filteredSets.isEmpty) return const Center(child: Text('No data yet'));
-    final sessionDates = filteredSets.map((s) => s.sessionStartedAt).toSet().toList()..sort();
-    final sessionIndex = {for (var i = 0; i < sessionDates.length; i++) sessionDates[i]: i.toDouble()};
+    if (filteredSets.isEmpty || sessionDates.isEmpty) return const Center(child: Text('No data yet'));
+    final minDate = sessionDates.reduce((a, b) => a.isBefore(b) ? a : b);
+    final maxDate = sessionDates.reduce((a, b) => a.isAfter(b) ? a : b);
+    final totalDays = maxDate.difference(minDate).inDays.toDouble();
     final labelIndices = <int>{};
     if (sessionDates.length <= 4) {
       labelIndices.addAll(List.generate(sessionDates.length, (i) => i));
@@ -76,7 +79,8 @@ class TrendChart extends StatelessWidget {
     if (!multiLine) {
       final spots = <FlSpot>[];
       for (final set in filteredSets) {
-        spots.add(FlSpot(sessionIndex[set.sessionStartedAt]!, yValue(set)));
+        final days = set.sessionStartedAt.difference(minDate).inDays.toDouble();
+        spots.add(FlSpot(days, yValue(set)));
       }
       spots.sort((a, b) => a.x.compareTo(b.x));
       if (spots.isEmpty) return const Center(child: Text('No data yet'));
@@ -85,6 +89,8 @@ class TrendChart extends StatelessWidget {
           Expanded(
             child: LineChart(
               LineChartData(
+                minX: 0,
+                maxX: totalDays,
                 minY: 0,
                 gridData: const FlGridData(show: true),
                 titlesData: FlTitlesData(
@@ -95,9 +101,11 @@ class TrendChart extends StatelessWidget {
                       showTitles: true,
                       reservedSize: 60,
                       getTitlesWidget: (value, meta) {
-                        final index = value.toInt();
-                        if (index >= 0 && index < sessionDates.length && labelIndices.contains(index)) {
-                          return Text(shortDate.format(sessionDates[index]), style: const TextStyle(fontSize: 10));
+                        final days = value.round();
+                        final date = minDate.add(Duration(days: days));
+                        final index = sessionDates.indexWhere((d) => d.year == date.year && d.month == date.month && d.day == date.day);
+                        if (index >= 0 && labelIndices.contains(index)) {
+                          return Text(shortDate.format(date), style: const TextStyle(fontSize: 10));
                         }
                         return const Text('');
                       },
@@ -151,7 +159,8 @@ class TrendChart extends StatelessWidget {
       if (setItems.isEmpty) continue;
       final spots = <FlSpot>[];
       for (final item in setItems) {
-        spots.add(FlSpot(sessionIndex[item.sessionStartedAt]!, yValue(item)));
+        final days = item.sessionStartedAt.difference(minDate).inDays.toDouble();
+        spots.add(FlSpot(days, yValue(item)));
       }
       spots.sort((a, b) => a.x.compareTo(b.x));
       final color = colors[(setNum - 1) % colors.length];
@@ -178,6 +187,8 @@ class TrendChart extends StatelessWidget {
         Expanded(
           child: LineChart(
             LineChartData(
+              minX: 0,
+              maxX: totalDays,
               minY: 0,
               gridData: const FlGridData(show: true),
               titlesData: FlTitlesData(
@@ -188,9 +199,11 @@ class TrendChart extends StatelessWidget {
                     showTitles: true,
                     reservedSize: 60,
                     getTitlesWidget: (value, meta) {
-                      final index = value.toInt();
-                      if (index >= 0 && index < sessionDates.length && labelIndices.contains(index)) {
-                        return Text(shortDate.format(sessionDates[index]), style: const TextStyle(fontSize: 10));
+                      final days = value.round();
+                      final date = minDate.add(Duration(days: days));
+                      final index = sessionDates.indexWhere((d) => d.year == date.year && d.month == date.month && d.day == date.day);
+                      if (index >= 0 && labelIndices.contains(index)) {
+                        return Text(shortDate.format(date), style: const TextStyle(fontSize: 10));
                       }
                       return const Text('');
                     },
