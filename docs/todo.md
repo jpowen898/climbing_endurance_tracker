@@ -1,0 +1,23 @@
+# Project TODO's
+
+- [ ] Support more workout types:
+    - [ ] Abstract exercise types, each type can have a different list of tracked attributes (For example Endurance Climb exercise will have route, num moves, set duration, and rest duration).
+    - [ ] Mutliple workout types:
+        - [ ] Running (distance)
+        - [ ] Running (interval training)
+        - [ ] Gym weights (weight + duration + rest)
+        - [ ] Climbing Power (Rating quick logging)
+    - [ ] Workout plans
+        - Multiple activities (bench, squat, pull-ups, yellow cicuit, ect)
+        - Num sets.
+        - Weight (optional)
+        - Rest periods between sets (optional)
+        - Quick start from saved workouts on main screen
+- [ ] Support more metrics
+    - [ ] Heart rate
+    - [ ] GPS Distance
+    - [ ] Altitude recording
+- [ ] Audio Queues (Running distance, rest duration complete,)
+- [ ] Data export
+- [ ] Dynamic Plots (plot any recorded value for any workout or exercise type)
+- [ ] More generic data import.
