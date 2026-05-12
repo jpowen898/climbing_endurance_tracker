@@ -71,25 +71,26 @@ The app will install and launch on the active emulator.
 1. Enable Developer Options on the phone.
 2. Turn on USB debugging.
 3. Connect the phone to your computer via USB.
-4. Verify the device is connected:
+4. On the phone select `USB Preferences` and select `File Transfer / Android Auto`
+5. Verify the device is connected:
 
 ```bash
 adb devices
 ```
 
-5. Build the APK:
+6. Build the APK:
 
 ```bash
 flutter build apk --debug
 ```
 
-6. Install the APK on the device:
+7. Install the APK on the device:
 
 ```bash
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
-7. Launch from the phone or use:
+8. Launch from the phone or use:
 
 ```bash
 adb shell am start -n com.example.climb_endurance/com.example.climb_endurance.MainActivity

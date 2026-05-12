@@ -78,7 +78,7 @@ class _RecordPageState extends State<RecordPage> {
       startedAt: now,
       endedAt: null,
       wallTimeSeconds: 0,
-      restAfterSeconds: null,
+      restAfterSeconds: 0,
       targetRestSeconds: setup.targetRestSeconds,
       movesCompleted: 0,
     ));
@@ -120,6 +120,7 @@ class _RecordPageState extends State<RecordPage> {
         ));
     await _loadRoutes();
     final now = DateTime.now();
+    final currentSet = firstWhereOrNull(_sets, (set) => set.id == currentSetId);
     await db.updateSet(WorkoutSet(
       id: currentSetId,
       sessionId: sessionId,
@@ -128,7 +129,7 @@ class _RecordPageState extends State<RecordPage> {
       startedAt: startedAt,
       endedAt: now,
       wallTimeSeconds: elapsed,
-      restAfterSeconds: null,
+      restAfterSeconds: currentSet?.restAfterSeconds,
       targetRestSeconds: _targetRestSeconds,
       movesCompleted: entry.movesCompleted,
       notes: entry.notes,

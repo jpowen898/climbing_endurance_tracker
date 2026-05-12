@@ -14,8 +14,9 @@ class ClimbDatabase {
     final path = p.join(await getDatabasesPath(), 'climb_endurance.sqlite');
     _db = await openDatabase(
       path,
-      version: 1,
+      version: 2,
       onCreate: _create,
+      onUpgrade: _upgrade,
       onOpen: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -50,7 +51,7 @@ class ClimbDatabase {
         route_id INTEGER NOT NULL REFERENCES routes(id),
         set_number INTEGER NOT NULL,
         started_at INTEGER NOT NULL,
-        ended_at INTEGER NOT NULL,
+        ended_at INTEGER,
         wall_time_seconds INTEGER NOT NULL,
         rest_after_seconds INTEGER,
         target_rest_seconds INTEGER NOT NULL,
@@ -58,6 +59,35 @@ class ClimbDatabase {
         notes TEXT NOT NULL DEFAULT ''
       )
     ''');
+  }
+
+  Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
+    if (oldVersion < 2) {
+      await db.execute('PRAGMA foreign_keys = OFF');
+      await db.execute('''
+        CREATE TABLE sets_new(
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+          route_id INTEGER NOT NULL REFERENCES routes(id),
+          set_number INTEGER NOT NULL,
+          started_at INTEGER NOT NULL,
+          ended_at INTEGER,
+          wall_time_seconds INTEGER NOT NULL,
+          rest_after_seconds INTEGER,
+          target_rest_seconds INTEGER NOT NULL,
+          moves_completed INTEGER NOT NULL,
+          notes TEXT NOT NULL DEFAULT ''
+        )
+      ''');
+      await db.execute('''
+        INSERT INTO sets_new (id, session_id, route_id, set_number, started_at, ended_at, wall_time_seconds, rest_after_seconds, target_rest_seconds, moves_completed, notes)
+        SELECT id, session_id, route_id, set_number, started_at, ended_at, wall_time_seconds, rest_after_seconds, target_rest_seconds, moves_completed, notes
+        FROM sets;
+      ''');
+      await db.execute('DROP TABLE sets');
+      await db.execute('ALTER TABLE sets_new RENAME TO sets');
+      await db.execute('PRAGMA foreign_keys = ON');
+    }
   }
 
   Future<List<RouteEntry>> routes() async {
