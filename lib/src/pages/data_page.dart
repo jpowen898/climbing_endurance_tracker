@@ -14,10 +14,10 @@ class DataPage extends StatefulWidget {
 
 class _DataPageState extends State<DataPage> {
   final db = ClimbDatabase.instance;
-  List<RouteEntry> _routes = [];
-  List<SetWithRoute> _sets = [];
+  List<Exercise> _exercises = [];
+  List<SetWithExercise> _sets = [];
   List<WorkoutSession> _sessions = [];
-  int? _routeId;
+  int? _exerciseId;
   DateTimeRange _dateRange = DateTimeRange(
     start: DateTime.now().subtract(const Duration(days: 30)),
     end: DateTime.now(),
@@ -30,38 +30,57 @@ class _DataPageState extends State<DataPage> {
   }
 
   Future<void> _load() async {
-    final routes = await db.routes();
+    final exercises = await db.exercises();
     final sessions = await db.sessions();
     final sets = await db.allSets();
     if (!mounted) return;
     setState(() {
-      _routes = routes;
+      _exercises = exercises;
       _sessions = sessions;
       _sets = sets.reversed.toList();
-      _routeId ??= routes.isEmpty ? null : routes.first.id;
     });
   }
 
   List<WorkoutSession> get _filteredSessions {
     return _sessions.where((session) {
-      return session.startedAt.isAfter(_dateRange.start.subtract(const Duration(days: 1))) &&
-             session.startedAt.isBefore(_dateRange.end.add(const Duration(days: 1)));
+      return session.startedAt
+              .isAfter(_dateRange.start.subtract(const Duration(days: 1))) &&
+          session.startedAt
+              .isBefore(_dateRange.end.add(const Duration(days: 1)));
     }).toList();
   }
 
-  List<SetWithRoute> get _filteredSets {
+  List<SetWithExercise> get _filteredSets {
     return _sets.where((item) {
-      return item.sessionStartedAt.isAfter(_dateRange.start.subtract(const Duration(days: 1))) &&
-             item.sessionStartedAt.isBefore(_dateRange.end.add(const Duration(days: 1)));
+      final inRange = item.sessionStartedAt
+              .isAfter(_dateRange.start.subtract(const Duration(days: 1))) &&
+          item.sessionStartedAt
+              .isBefore(_dateRange.end.add(const Duration(days: 1)));
+      final exerciseMatches =
+          _exerciseId == null || item.set.exerciseId == _exerciseId;
+      return inRange && exerciseMatches;
     }).toList();
   }
 
   @override
   Widget build(BuildContext context) {
-    final filtered = _routeId == null
-        ? _filteredSets
-        : _filteredSets.where((item) => item.set.routeId == _routeId).toList();
-    final sessionDates = _filteredSessions.map((s) => s.startedAt).toSet().toList()..sort();
+    final filtered = _filteredSets;
+    final sessionDates = _filteredSessions
+        .map((s) =>
+            DateTime(s.startedAt.year, s.startedAt.month, s.startedAt.day))
+        .toSet()
+        .toList()
+      ..sort();
+    final selectedExercise = _exerciseId == null
+        ? null
+        : firstWhereOrNull(
+            _exercises, (exercise) => exercise.id == _exerciseId);
+    final metricKeys = selectedExercise == null
+        ? filtered.expand((item) => item.exercise.plotMetrics).toSet().toList()
+        : selectedExercise.plotMetrics;
+    final metrics =
+        metricKeys.map(metricDefinition).whereType<MetricDefinition>().toList();
+
     return RefreshIndicator(
       onRefresh: _load,
       child: ListView(
@@ -69,9 +88,10 @@ class _DataPageState extends State<DataPage> {
         children: [
           Text(
             'Data',
-            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
+            style: Theme.of(context)
+                .textTheme
+                .headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
           _TimeFilter(
@@ -80,71 +100,57 @@ class _DataPageState extends State<DataPage> {
           ),
           const SizedBox(height: 12),
           DropdownButtonFormField<int?>(
-            initialValue: _routeId,
-            decoration: const InputDecoration(labelText: 'Route filter'),
+            initialValue: _exerciseId,
+            decoration: const InputDecoration(labelText: 'Exercise filter'),
             items: [
-              const DropdownMenuItem(value: null, child: Text('All routes')),
-              ..._routes.map((r) => DropdownMenuItem(value: r.id, child: Text(r.name))),
+              const DropdownMenuItem(value: null, child: Text('All exercises')),
+              ..._exercises.map((exercise) => DropdownMenuItem(
+                  value: exercise.id, child: Text(exercise.name))),
             ],
-            onChanged: (value) => setState(() => _routeId = value),
+            onChanged: (value) => setState(() => _exerciseId = value),
           ),
           const SizedBox(height: 16),
-          ChartCard(
-            title: 'Moves over time',
-            child: TrendChart(
-              sets: filtered,
-              sessionDates: sessionDates,
-              yValue: (item) => item.set.movesCompleted.toDouble(),
-              label: 'moves',
-              multiLine: true,
+          if (metrics.isEmpty)
+            const Card(
+                child: Padding(
+                    padding: EdgeInsets.all(16),
+                    child: Text('No plot data yet')))
+          else
+            ...metrics.expand((metric) sync* {
+              final metricSets = filtered
+                  .where((item) => metric.value(item.set) != null)
+                  .toList();
+              if (metricSets.isEmpty) return;
+              yield ChartCard(
+                title: '${metric.label} over time',
+                child: TrendChart(
+                    sets: metricSets,
+                    sessionDates: sessionDates,
+                    metric: metric),
+              );
+              yield const SizedBox(height: 12);
+            }),
+          if (selectedExercise != null &&
+              selectedExercise.plotMetrics.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            ChartCard(
+              title: 'Falloff from first set',
+              child: FalloffChart(
+                sets: filtered,
+                metric: metricDefinition(selectedExercise.plotMetrics.first) ??
+                    metricDefinitions.first,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          ChartCard(
-            title: 'Speed over time',
-            child: TrendChart(
-              sets: filtered,
-              sessionDates: sessionDates,
-              yValue: (item) => item.set.movesPerMinute,
-              label: 'moves/min',
-              multiLine: true,
-              includePoint: (item) => item.set.wallTimeSeconds > 0,
+            const SizedBox(height: 12),
+            ChartCard(
+              title: 'Falloff vs rest',
+              child: RestFalloffChart(
+                sets: filtered,
+                metric: metricDefinition(selectedExercise.plotMetrics.first) ??
+                    metricDefinitions.first,
+              ),
             ),
-          ),
-          const SizedBox(height: 12),
-          ChartCard(
-            title: 'Wall time over time',
-            child: TrendChart(
-              sets: filtered,
-              sessionDates: sessionDates,
-              yValue: (item) => item.set.wallTimeSeconds.toDouble(),
-              label: 'seconds',
-              multiLine: true,
-              includePoint: (item) => item.set.wallTimeSeconds > 0,
-            ),
-          ),
-          const SizedBox(height: 12),
-          ChartCard(
-            title: 'Rest time over time',
-            child: TrendChart(
-              sets: filtered,
-              sessionDates: sessionDates,
-              yValue: (item) => item.set.restAfterSeconds?.toDouble() ?? 0,
-              label: 'seconds',
-              multiLine: true,
-              includePoint: (item) => item.set.restAfterSeconds != null && item.set.restAfterSeconds! > 0,
-            ),
-          ),
-          const SizedBox(height: 12),
-          ChartCard(
-            title: 'Falloff from first set',
-            child: FalloffChart(sets: filtered),
-          ),
-          const SizedBox(height: 12),
-          ChartCard(
-            title: 'Falloff vs rest',
-            child: RestFalloffChart(sets: filtered),
-          ),
+          ],
         ],
       ),
     );
@@ -179,43 +185,37 @@ class _TimeFilter extends StatelessWidget {
           children: [
             OutlinedButton(
               onPressed: () => onChanged(DateTimeRange(
-                start: DateTime.now().subtract(const Duration(days: 30)),
-                end: DateTime.now(),
-              )),
+                  start: DateTime.now().subtract(const Duration(days: 30)),
+                  end: DateTime.now())),
               child: const Text('1 month'),
             ),
             OutlinedButton(
               onPressed: () => onChanged(DateTimeRange(
-                start: DateTime.now().subtract(const Duration(days: 63)),
-                end: DateTime.now(),
-              )),
+                  start: DateTime.now().subtract(const Duration(days: 63)),
+                  end: DateTime.now())),
               child: const Text('9 weeks'),
             ),
             OutlinedButton(
               onPressed: () => onChanged(DateTimeRange(
-                start: DateTime.now().subtract(const Duration(days: 180)),
-                end: DateTime.now(),
-              )),
+                  start: DateTime.now().subtract(const Duration(days: 180)),
+                  end: DateTime.now())),
               child: const Text('6 months'),
             ),
             OutlinedButton(
               onPressed: () => onChanged(DateTimeRange(
-                start: DateTime.now().subtract(const Duration(days: 365)),
-                end: DateTime.now(),
-              )),
+                  start: DateTime.now().subtract(const Duration(days: 365)),
+                  end: DateTime.now())),
               child: const Text('1 year'),
             ),
             OutlinedButton(
-              onPressed: () => _pickRange(context),
-              child: const Text('Custom'),
-            ),
+                onPressed: () => _pickRange(context),
+                child: const Text('Custom')),
           ],
         ),
         const SizedBox(height: 4),
         Text(
-          '${shortDate.format(dateRange.start)} - ${shortDate.format(dateRange.end)}',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
+            '${shortDate.format(dateRange.start)} - ${shortDate.format(dateRange.end)}',
+            style: Theme.of(context).textTheme.bodySmall),
       ],
     );
   }

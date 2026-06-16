@@ -7,17 +7,19 @@ class SessionSetTable extends StatelessWidget {
   const SessionSetTable({
     super.key,
     required this.sets,
-    required this.routes,
+    required this.exercises,
     required this.onChanged,
     required this.onDelete,
     required this.onAdd,
+    this.visibleMetricKeys,
   });
 
   final List<WorkoutSet> sets;
-  final List<RouteEntry> routes;
+  final List<Exercise> exercises;
   final ValueChanged<WorkoutSet> onChanged;
   final ValueChanged<int> onDelete;
   final VoidCallback onAdd;
+  final Set<String>? visibleMetricKeys;
 
   @override
   Widget build(BuildContext context) {
@@ -44,21 +46,7 @@ class SessionSetTable extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: const [
-                      SizedBox(width: 48, child: Text('Set', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 180, child: Text('Route', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 96, child: Text('Moves', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 96, child: Text('Rest', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 96, child: Text('Wall', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 12),
-                      SizedBox(width: 48, child: Text('')),
-                    ],
-                  ),
+                  _HeaderRow(visibleMetricKeys: visibleMetricKeys),
                   const SizedBox(height: 8),
                   if (sets.isEmpty)
                     const Text('No sets yet')
@@ -68,9 +56,10 @@ class SessionSetTable extends StatelessWidget {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: EditableWorkoutSetRow(
                           set: set,
-                          routes: routes,
+                          exercises: exercises,
                           onChanged: onChanged,
                           onDelete: () => onDelete(set.id!),
+                          visibleMetricKeys: visibleMetricKeys,
                         ),
                       );
                     }),
@@ -84,144 +73,262 @@ class SessionSetTable extends StatelessWidget {
   }
 }
 
+class _HeaderRow extends StatelessWidget {
+  const _HeaderRow({required this.visibleMetricKeys});
+
+  final Set<String>? visibleMetricKeys;
+
+  bool _showMetric(String key) {
+    return visibleMetricKeys == null || visibleMetricKeys!.contains(key);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        _header('Set', 48),
+        const SizedBox(width: 12),
+        _header('Exercise', 190),
+        if (_showMetric('duration')) ...[
+          const SizedBox(width: 12),
+          _header('Duration', 96)
+        ],
+        if (_showMetric('rest')) ...[
+          const SizedBox(width: 12),
+          _header('Rest', 96)
+        ],
+        if (_showMetric('reps')) ...[
+          const SizedBox(width: 12),
+          _header('Reps', 80)
+        ],
+        if (_showMetric('weight')) ...[
+          const SizedBox(width: 12),
+          _header('Weight', 92)
+        ],
+        if (_showMetric('moves')) ...[
+          const SizedBox(width: 12),
+          _header('Moves', 80)
+        ],
+        if (_showMetric('difficulty')) ...[
+          const SizedBox(width: 12),
+          _header('Difficulty', 100)
+        ],
+        if (_showMetric('distance')) ...[
+          const SizedBox(width: 12),
+          _header('Distance', 92)
+        ],
+        const SizedBox(width: 12),
+        const SizedBox(width: 48, child: Text('')),
+      ],
+    );
+  }
+
+  Widget _header(String label, double width) {
+    return SizedBox(
+      width: width,
+      child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+    );
+  }
+}
+
 class EditableWorkoutSetRow extends StatefulWidget {
   const EditableWorkoutSetRow({
     super.key,
     required this.set,
-    required this.routes,
+    required this.exercises,
     required this.onChanged,
     required this.onDelete,
+    this.visibleMetricKeys,
   });
 
   final WorkoutSet set;
-  final List<RouteEntry> routes;
+  final List<Exercise> exercises;
   final ValueChanged<WorkoutSet> onChanged;
   final VoidCallback onDelete;
+  final Set<String>? visibleMetricKeys;
 
   @override
   State<EditableWorkoutSetRow> createState() => _EditableWorkoutSetRowState();
 }
 
 class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
-  late int routeId;
-  late final TextEditingController movesController;
+  late int exerciseId;
+  late final TextEditingController durationController;
   late final TextEditingController restController;
-  late final TextEditingController wallController;
-  late final FocusNode movesFocus;
-  late final FocusNode restFocus;
-  late final FocusNode wallFocus;
+  late final TextEditingController repsController;
+  late final TextEditingController weightController;
+  late final TextEditingController movesController;
+  late final TextEditingController difficultyController;
+  late final TextEditingController distanceController;
+  final focusNodes = <FocusNode>[];
 
   @override
   void initState() {
     super.initState();
-    routeId = widget.set.routeId;
-    movesController = TextEditingController(text: '${widget.set.movesCompleted}');
-    restController = TextEditingController(text: widget.set.restAfterSeconds == null ? '' : formatDuration(widget.set.restAfterSeconds!));
-    wallController = TextEditingController(text: formatDuration(widget.set.wallTimeSeconds));
-    movesFocus = FocusNode()..addListener(_onFocusChange);
-    restFocus = FocusNode()..addListener(_onFocusChange);
-    wallFocus = FocusNode()..addListener(_onFocusChange);
+    exerciseId = widget.set.exerciseId;
+    durationController = TextEditingController();
+    restController = TextEditingController();
+    repsController = TextEditingController();
+    weightController = TextEditingController();
+    movesController = TextEditingController();
+    difficultyController = TextEditingController();
+    distanceController = TextEditingController();
+    for (var i = 0; i < 7; i++) {
+      focusNodes.add(FocusNode()..addListener(_onFocusChange));
+    }
+    _fillControllers();
   }
 
   @override
   void didUpdateWidget(covariant EditableWorkoutSetRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.set.id != oldWidget.set.id || widget.set.movesCompleted != oldWidget.set.movesCompleted || widget.set.wallTimeSeconds != oldWidget.set.wallTimeSeconds || widget.set.restAfterSeconds != oldWidget.set.restAfterSeconds) {
-      routeId = widget.set.routeId;
-      movesController.text = '${widget.set.movesCompleted}';
-      restController.text = widget.set.restAfterSeconds == null ? '' : formatDuration(widget.set.restAfterSeconds!);
-      wallController.text = formatDuration(widget.set.wallTimeSeconds);
+    if (widget.set.id != oldWidget.set.id || widget.set != oldWidget.set) {
+      exerciseId = widget.set.exerciseId;
+      _fillControllers();
     }
+  }
+
+  void _fillControllers() {
+    durationController.text = formatDuration(widget.set.setDurationSeconds);
+    restController.text = widget.set.restAfterSeconds == null
+        ? ''
+        : formatDuration(widget.set.restAfterSeconds!);
+    repsController.text = widget.set.reps?.toString() ?? '';
+    weightController.text = widget.set.weight?.toString() ?? '';
+    movesController.text = widget.set.moves?.toString() ?? '';
+    difficultyController.text = widget.set.difficulty ?? '';
+    distanceController.text = widget.set.distance?.toString() ?? '';
   }
 
   @override
   void dispose() {
-    movesController.dispose();
+    durationController.dispose();
     restController.dispose();
-    wallController.dispose();
-    movesFocus.dispose();
-    restFocus.dispose();
-    wallFocus.dispose();
+    repsController.dispose();
+    weightController.dispose();
+    movesController.dispose();
+    difficultyController.dispose();
+    distanceController.dispose();
+    for (final node in focusNodes) {
+      node.dispose();
+    }
     super.dispose();
   }
 
   void _onFocusChange() {
-    if (!movesFocus.hasFocus && !restFocus.hasFocus && !wallFocus.hasFocus) {
-      _updateSet();
-    }
+    if (focusNodes.every((node) => !node.hasFocus)) _updateSet();
   }
 
   void _updateSet() {
-    final moves = int.tryParse(movesController.text) ?? widget.set.movesCompleted;
-    final wallTime = parseDuration(wallController.text) ?? widget.set.wallTimeSeconds;
-    final rest = restController.text.trim().isEmpty ? null : parseDuration(restController.text);
-    widget.onChanged(widget.set.copyWith(
-      routeId: routeId,
-      movesCompleted: moves,
-      wallTimeSeconds: wallTime,
-      restAfterSeconds: rest,
+    widget.onChanged(WorkoutSet(
+      id: widget.set.id,
+      sessionId: widget.set.sessionId,
+      exerciseId: exerciseId,
+      planItemId: widget.set.planItemId,
+      sequenceIndex: widget.set.sequenceIndex,
+      setNumber: widget.set.setNumber,
+      isWarmup: widget.set.isWarmup,
+      startedAt: widget.set.startedAt,
+      endedAt: widget.set.endedAt,
+      setDurationSeconds: parseDuration(durationController.text) ??
+          widget.set.setDurationSeconds,
+      restAfterSeconds: restController.text.trim().isEmpty
+          ? null
+          : parseDuration(restController.text),
+      targetRestSeconds: widget.set.targetRestSeconds,
+      reps: repsController.text.trim().isEmpty
+          ? null
+          : int.tryParse(repsController.text),
+      weight: weightController.text.trim().isEmpty
+          ? null
+          : double.tryParse(weightController.text),
+      moves: movesController.text.trim().isEmpty
+          ? null
+          : int.tryParse(movesController.text),
+      difficulty: difficultyController.text.trim().isEmpty
+          ? null
+          : difficultyController.text.trim(),
+      distance: distanceController.text.trim().isEmpty
+          ? null
+          : double.tryParse(distanceController.text),
+      notes: widget.set.notes,
     ));
+  }
+
+  bool _showMetric(String key) {
+    return widget.visibleMetricKeys == null ||
+        widget.visibleMetricKeys!.contains(key);
   }
 
   @override
   Widget build(BuildContext context) {
+    final exercise = widget.exercises
+        .where((item) => item.id == exerciseId)
+        .cast<Exercise?>()
+        .firstOrNull;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 48, child: Text('${widget.set.setNumber}')),
+        SizedBox(
+          width: 48,
+          child: Text(widget.set.isWarmup ? 'W' : '${widget.set.setNumber}'),
+        ),
         const SizedBox(width: 12),
         SizedBox(
-          width: 180,
+          width: 190,
           child: DropdownButtonFormField<int>(
-            initialValue: routeId,
+            initialValue: exerciseId,
             isExpanded: true,
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)),
-            items: widget.routes
-                .map((route) => DropdownMenuItem(value: route.id, child: Text(route.name)))
+            decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(),
+                contentPadding:
+                    EdgeInsets.symmetric(horizontal: 8, vertical: 12)),
+            items: widget.exercises
+                .map((exercise) => DropdownMenuItem(
+                    value: exercise.id, child: Text(exercise.name)))
                 .toList(),
             onChanged: (value) {
               if (value == null) return;
-              setState(() => routeId = value);
+              setState(() => exerciseId = value);
               _updateSet();
             },
           ),
         ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 96,
-          child: TextField(
-            controller: movesController,
-            focusNode: movesFocus,
-            keyboardType: TextInputType.number,
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12)),
-            onEditingComplete: _updateSet,
-            onSubmitted: (_) => _updateSet(),
-          ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 96,
-          child: TextField(
-            controller: restController,
-            focusNode: restFocus,
-            keyboardType: TextInputType.datetime,
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12), hintText: 'm:ss'),
-            onEditingComplete: _updateSet,
-            onSubmitted: (_) => _updateSet(),
-          ),
-        ),
-        const SizedBox(width: 12),
-        SizedBox(
-          width: 96,
-          child: TextField(
-            controller: wallController,
-            focusNode: wallFocus,
-            keyboardType: TextInputType.datetime,
-            decoration: const InputDecoration(isDense: true, border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 12), hintText: 'm:ss'),
-            onEditingComplete: _updateSet,
-            onSubmitted: (_) => _updateSet(),
-          ),
-        ),
+        if (_showMetric('duration')) ...[
+          const SizedBox(width: 12),
+          _cell(durationController, focusNodes[0], TextInputType.datetime,
+              'm:ss'),
+        ],
+        if (_showMetric('rest')) ...[
+          const SizedBox(width: 12),
+          _cell(restController, focusNodes[1], TextInputType.datetime, 'm:ss'),
+        ],
+        if (_showMetric('reps')) ...[
+          const SizedBox(width: 12),
+          _cell(repsController, focusNodes[2], TextInputType.number,
+              exercise?.recordsReps == true ? '' : '-'),
+        ],
+        if (_showMetric('weight')) ...[
+          const SizedBox(width: 12),
+          _cell(weightController, focusNodes[3], TextInputType.number,
+              exercise?.recordsWeight == true ? '' : '-'),
+        ],
+        if (_showMetric('moves')) ...[
+          const SizedBox(width: 12),
+          _cell(movesController, focusNodes[4], TextInputType.number,
+              exercise?.recordsMoves == true ? '' : '-'),
+        ],
+        if (_showMetric('difficulty')) ...[
+          const SizedBox(width: 12),
+          _cell(difficultyController, focusNodes[5], TextInputType.text,
+              exercise?.recordsDifficulty == true ? '' : '-'),
+        ],
+        if (_showMetric('distance')) ...[
+          const SizedBox(width: 12),
+          _cell(distanceController, focusNodes[6], TextInputType.number,
+              exercise?.recordsDistance == true ? '' : '-'),
+        ],
         const SizedBox(width: 12),
         SizedBox(
           width: 48,
@@ -233,5 +340,34 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
         ),
       ],
     );
+  }
+
+  Widget _cell(TextEditingController controller, FocusNode focusNode,
+      TextInputType inputType, String hint) {
+    return SizedBox(
+      width: inputType == TextInputType.text ? 100 : 92,
+      child: TextField(
+        controller: controller,
+        focusNode: focusNode,
+        keyboardType: inputType,
+        decoration: InputDecoration(
+          isDense: true,
+          border: const OutlineInputBorder(),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
+          hintText: hint,
+        ),
+        onEditingComplete: _updateSet,
+        onSubmitted: (_) => _updateSet(),
+      ),
+    );
+  }
+}
+
+extension _FirstOrNull<T> on Iterable<T> {
+  T? get firstOrNull {
+    final iterator = this.iterator;
+    if (!iterator.moveNext()) return null;
+    return iterator.current;
   }
 }

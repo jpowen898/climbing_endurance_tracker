@@ -16,9 +16,9 @@ class RawDataPage extends StatefulWidget {
 
 class _RawDataPageState extends State<RawDataPage> {
   final db = ClimbDatabase.instance;
-  List<RouteEntry> _routes = [];
+  List<Exercise> _exercises = [];
   List<WorkoutSession> _sessions = [];
-  List<SetWithRoute> _sets = [];
+  List<SetWithExercise> _sets = [];
 
   @override
   void initState() {
@@ -27,102 +27,175 @@ class _RawDataPageState extends State<RawDataPage> {
   }
 
   Future<void> _load() async {
-    final routes = await db.routes();
+    final exercises = await db.exercises();
     final sessions = await db.sessions();
     final sets = await db.allSets();
     if (!mounted) return;
     setState(() {
-      _routes = routes;
+      _exercises = exercises;
       _sessions = sessions;
       _sets = sets;
     });
   }
 
   Future<void> _importCsv() async {
-    final csvController = TextEditingController();
-    final imported = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Import CSV'),
-        content: TextField(
-          controller: csvController,
-          maxLines: 10,
-          decoration: const InputDecoration(
-            hintText: 'Paste CSV data here',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Import'),
-          ),
-        ],
-      ),
-    );
-    if (imported != true) return;
+    final config = await showDialog<_CsvImportConfig>(
+        context: context, builder: (_) => const _CsvImportDialog());
+    if (config == null) return;
     try {
-      final csvData = const CsvToListConverter(eol: '\n').convert(csvController.text);
+      final csvData = csv.decode(config.csvText);
       if (csvData.isEmpty) return;
-      final header = csvData[0].map((e) => e.toString()).toList();
-      if (header.length < 5 || !header[0].toLowerCase().contains('date')) {
-        throw 'Invalid CSV format';
+      final headers = csvData.first.map((e) => e.toString().trim()).toList();
+      final lookup = <String, int>{};
+      for (var i = 0; i < headers.length; i++) {
+        lookup[headers[i].toLowerCase()] = i;
       }
+      final dateIndex = lookup[config.dateColumn.toLowerCase()];
+      if (dateIndex == null) throw 'Date column not found';
+      final exerciseColumnIndex = config.exerciseColumn.trim().isEmpty
+          ? null
+          : lookup[config.exerciseColumn.toLowerCase()];
+      final repsColumns = _columnIndexes(config.repsColumns, lookup);
+      final weightColumns = _columnIndexes(config.weightColumns, lookup);
+      final movesColumns = _columnIndexes(config.movesColumns, lookup);
+      final difficultyColumns =
+          _columnIndexes(config.difficultyColumns, lookup);
+      final distanceColumns = _columnIndexes(config.distanceColumns, lookup);
+      final durationColumns = _columnIndexes(config.durationColumns, lookup);
+      final restColumns = _columnIndexes(config.restColumns, lookup);
+      final maxSets = [
+        repsColumns,
+        weightColumns,
+        movesColumns,
+        difficultyColumns,
+        distanceColumns,
+        durationColumns,
+        restColumns,
+      ]
+          .map((items) => items.length)
+          .fold<int>(1, (max, value) => value > max ? value : max);
+
       var importedSessions = 0;
+      var importedSets = 0;
       for (final row in csvData.skip(1)) {
-        if (row.length < 5) continue;
-        final dateStr = row[0].toString();
-        final routeName = row[2].toString();
-        final dateParts = dateStr.split('/');
-        if (dateParts.length != 3) continue;
-        final month = int.parse(dateParts[0]);
-        final day = int.parse(dateParts[1]);
-        final year = 2000 + int.parse(dateParts[2]);
-        final sessionDate = DateTime(year, month, day);
-        final routeId = await db.getOrCreateRoute(routeName);
-        final session = WorkoutSession(
-          startedAt: sessionDate,
-          targetRestSeconds: 480, // 8 min default
-        );
-        final sessionId = await db.createSession(session);
+        if (row.length <= dateIndex) continue;
+        final date = _parseDate(row[dateIndex].toString());
+        if (date == null) continue;
+        final exerciseName =
+            exerciseColumnIndex == null || row.length <= exerciseColumnIndex
+                ? config.defaultExercise
+                : row[exerciseColumnIndex].toString().trim();
+        if (exerciseName.isEmpty) continue;
+        final exerciseId =
+            await db.getOrCreateExercise(exerciseName, config.kind);
+        final sessionId = await db.createSession(WorkoutSession(
+          name: config.sessionName.trim().isEmpty
+              ? 'Imported workout'
+              : config.sessionName.trim(),
+          startedAt: date,
+          targetRestSeconds: config.defaultRestSeconds,
+        ));
         var setNumber = 1;
-        for (var i = 4; i < row.length; i++) {
-          final valueStr = row[i].toString().trim();
-          if (valueStr.isEmpty) continue;
-          final value = double.tryParse(valueStr);
-          if (value == null) continue;
-          final wallTimeSeconds = 0;
-          final set = WorkoutSet(
+        for (var i = 0; i < maxSets; i++) {
+          final duration = _durationFrom(row, durationColumns, i) ?? 0;
+          final rest = _durationFrom(row, restColumns, i);
+          final reps = _intFrom(row, repsColumns, i);
+          final weight = _doubleFrom(row, weightColumns, i);
+          final moves = _intFrom(row, movesColumns, i);
+          final difficulty = _stringFrom(row, difficultyColumns, i);
+          final distance = _doubleFrom(row, distanceColumns, i);
+          final hasMetric = [reps, weight, moves, difficulty, distance]
+                  .any((value) => value != null) ||
+              duration > 0 ||
+              rest != null;
+          if (!hasMetric) continue;
+          await db.insertSet(WorkoutSet(
             sessionId: sessionId,
-            routeId: routeId,
+            exerciseId: exerciseId,
+            sequenceIndex: 0,
             setNumber: setNumber,
-            startedAt: sessionDate,
-            endedAt: sessionDate,
-            wallTimeSeconds: wallTimeSeconds,
-            restAfterSeconds: null,
-            targetRestSeconds: 480,
-            movesCompleted: value.toInt(),
-          );
-          await db.insertSet(set);
+            startedAt: date,
+            endedAt:
+                duration > 0 ? date.add(Duration(seconds: duration)) : date,
+            setDurationSeconds: duration,
+            restAfterSeconds: rest,
+            targetRestSeconds: config.defaultRestSeconds,
+            reps: reps,
+            weight: weight,
+            moves: moves,
+            difficulty: difficulty,
+            distance: distance,
+          ));
           setNumber++;
+          importedSets++;
         }
         importedSessions++;
       }
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Imported $importedSessions sessions successfully')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Imported $importedSessions sessions and $importedSets sets')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Import failed: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('Import failed: $e')));
     }
+  }
+
+  List<int> _columnIndexes(String text, Map<String, int> lookup) {
+    return text
+        .split(',')
+        .map((item) => item.trim().toLowerCase())
+        .where((item) => item.isNotEmpty)
+        .map((item) => lookup[item])
+        .whereType<int>()
+        .toList();
+  }
+
+  int? _intFrom(List<dynamic> row, List<int> columns, int index) =>
+      _doubleFrom(row, columns, index)?.round();
+
+  double? _doubleFrom(List<dynamic> row, List<int> columns, int index) {
+    final column = _columnFor(columns, index);
+    if (column == null || row.length <= column) return null;
+    return double.tryParse(row[column].toString().trim());
+  }
+
+  String? _stringFrom(List<dynamic> row, List<int> columns, int index) {
+    final column = _columnFor(columns, index);
+    if (column == null || row.length <= column) return null;
+    final value = row[column].toString().trim();
+    return value.isEmpty ? null : value;
+  }
+
+  int? _durationFrom(List<dynamic> row, List<int> columns, int index) {
+    final value = _stringFrom(row, columns, index);
+    if (value == null) return null;
+    return parseDuration(value) ?? double.tryParse(value)?.round();
+  }
+
+  int? _columnFor(List<int> columns, int index) {
+    if (columns.isEmpty) return null;
+    if (columns.length == 1) return columns.first;
+    return index < columns.length ? columns[index] : null;
+  }
+
+  DateTime? _parseDate(String text) {
+    final trimmed = text.trim();
+    final iso = DateTime.tryParse(trimmed);
+    if (iso != null) return iso;
+    final slash = trimmed.split('/');
+    if (slash.length == 3) {
+      final month = int.tryParse(slash[0]);
+      final day = int.tryParse(slash[1]);
+      final yearRaw = int.tryParse(slash[2]);
+      if (month != null && day != null && yearRaw != null) {
+        final year = yearRaw < 100 ? 2000 + yearRaw : yearRaw;
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
   }
 
   @override
@@ -137,68 +210,29 @@ class _RawDataPageState extends State<RawDataPage> {
       child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  'Raw Data',
-                  style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                ),
-              ),
-            ],
+          Text(
+            'Raw Data',
+            style: Theme.of(context)
+                .textTheme
+                .headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Routes', style: Theme.of(context).textTheme.titleLarge),
-              FilledButton.icon(
-                onPressed: _addRoute,
-                icon: const Icon(Icons.add),
-                label: const Text('Add route'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          ExpansionTile(
-            title: Text('${_routes.length} routes'),
-            initiallyExpanded: false,
-            children: _routes.map((route) => Card(
-                  child: ListTile(
-                    title: Text(route.name),
-                    subtitle: Text([
-                      if (route.wall.isNotEmpty) route.wall,
-                      if (route.holdCount != null) '${route.holdCount} holds',
-                      if (route.notes.isNotEmpty) route.notes,
-                    ].join(' - ')),
-                    trailing: IconButton(
-                      tooltip: 'Edit route',
-                      icon: const Icon(Icons.edit_outlined),
-                      onPressed: () => _editRoute(route),
-                    ),
-                  ),
-                )).toList(),
-          ),
-          const SizedBox(height: 18),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text('Workouts', style: Theme.of(context).textTheme.titleLarge),
+              Text('Sessions', style: Theme.of(context).textTheme.titleLarge),
               Row(
                 children: [
                   FilledButton.icon(
-                    onPressed: _addSession,
-                    icon: const Icon(Icons.add),
-                    label: const Text('Add session'),
-                  ),
+                      onPressed: _addSession,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Add session')),
                   const SizedBox(width: 8),
                   OutlinedButton.icon(
-                    onPressed: _importCsv,
-                    icon: const Icon(Icons.upload),
-                    label: const Text('Import CSV'),
-                  ),
+                      onPressed: _importCsv,
+                      icon: const Icon(Icons.upload),
+                      label: const Text('Import CSV')),
                 ],
               ),
             ],
@@ -206,22 +240,23 @@ class _RawDataPageState extends State<RawDataPage> {
           const SizedBox(height: 8),
           ..._sessions.map((session) {
             final sessionSets = setsBySession[session.id] ?? [];
-            final totalDuration = sessionSets.fold<int>(0, (sum, set) {
-              return sum + set.wallTimeSeconds + (set.restAfterSeconds ?? 0);
-            });
+            final totalDuration = sessionSets.fold<int>(
+                0,
+                (sum, set) =>
+                    sum + set.setDurationSeconds + (set.restAfterSeconds ?? 0));
             return Card(
               child: ExpansionTile(
                 key: ValueKey(session.id),
-                title: Text(dateFormat.format(session.startedAt)),
+                title: Text(
+                    '${session.name} - ${dateFormat.format(session.startedAt)}'),
                 subtitle: Text(
-                  '${sessionSets.length} sets · ${formatDuration(totalDuration)}',
-                ),
+                    '${sessionSets.length} sets - ${formatDuration(totalDuration)}'),
                 childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
                 children: [
                   SessionSetTable(
                     sets: sessionSets,
-                    routes: _routes,
-                    onChanged: (set) => _updateSet(set),
+                    exercises: _exercises,
+                    onChanged: _updateSet,
                     onDelete: _deleteSet,
                     onAdd: () => _addSet(session.id!),
                   ),
@@ -230,16 +265,14 @@ class _RawDataPageState extends State<RawDataPage> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton.icon(
-                        onPressed: () => _editSession(session),
-                        icon: const Icon(Icons.edit_outlined),
-                        label: const Text('Edit session'),
-                      ),
+                          onPressed: () => _editSession(session),
+                          icon: const Icon(Icons.edit_outlined),
+                          label: const Text('Edit session')),
                       const SizedBox(width: 8),
                       TextButton.icon(
-                        onPressed: () => _deleteSession(session),
-                        icon: const Icon(Icons.delete_outline),
-                        label: const Text('Delete session'),
-                      ),
+                          onPressed: () => _deleteSession(session),
+                          icon: const Icon(Icons.delete_outline),
+                          label: const Text('Delete session')),
                     ],
                   ),
                 ],
@@ -251,59 +284,25 @@ class _RawDataPageState extends State<RawDataPage> {
     );
   }
 
-  Future<void> _addRoute() async {
-    final route = await showDialog<RouteEntry>(
-      context: context,
-      builder: (_) => const RouteDialog(),
-    );
-    if (route == null) return;
-    await db.upsertRoute(route);
-    await _load();
-  }
-
-  Future<void> _editRoute(RouteEntry route) async {
-    final edited = await showDialog<RouteEntry>(
-      context: context,
-      builder: (_) => RouteDialog(route: route),
-    );
-    if (edited == null) return;
-    await db.upsertRoute(edited);
-    await _load();
-  }
-
   Future<void> _editSession(WorkoutSession session) async {
     final edited = await showDialog<WorkoutSession>(
-      context: context,
-      builder: (_) => SessionDialog(session: session),
-    );
+        context: context, builder: (_) => SessionDialog(session: session));
     if (edited == null) return;
     await db.updateSession(edited);
     await _load();
   }
 
-
   Future<void> _addSession() async {
     final session = await showDialog<WorkoutSession>(
-      context: context,
-      builder: (_) => const NewSessionDialog(),
-    );
+        context: context, builder: (_) => const NewSessionDialog());
     if (session == null) return;
     await db.createSession(session);
     await _load();
   }
 
   Future<void> _deleteSession(WorkoutSession session) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete session'),
-        content: const Text('Remove this workout and all of its sets?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-        ],
-      ),
-    );
+    final confirm = await _confirm(
+        'Delete session', 'Remove this workout and all of its sets?');
     if (confirm != true || session.id == null) return;
     await db.deleteSession(session.id!);
     await _load();
@@ -315,53 +314,216 @@ class _RawDataPageState extends State<RawDataPage> {
   }
 
   Future<void> _addSet(int sessionId) async {
-    if (_routes.isEmpty) return;
-    final sessionSets = _sets.where((item) => item.set.sessionId == sessionId).toList();
-    final routeId = _routes.first.id!;
-    final newSet = WorkoutSet(
+    if (_exercises.isEmpty) return;
+    final sessionSets =
+        _sets.where((item) => item.set.sessionId == sessionId).toList();
+    await db.insertSet(WorkoutSet(
       sessionId: sessionId,
-      routeId: routeId,
+      exerciseId: _exercises.first.id!,
+      sequenceIndex: 0,
       setNumber: sessionSets.length + 1,
       startedAt: DateTime.now(),
       endedAt: DateTime.now(),
-      wallTimeSeconds: 0,
+      setDurationSeconds: 0,
       restAfterSeconds: null,
-      targetRestSeconds: 0,
-      movesCompleted: 0,
-    );
-    await db.insertSet(newSet);
-    await _renumberSets(sessionId);
+      targetRestSeconds: 120,
+    ));
     await _load();
   }
 
   Future<void> _deleteSet(int setId) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        title: const Text('Delete set'),
-        content: const Text('Remove this set from the workout?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
-          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Delete')),
-        ],
-      ),
-    );
+    final confirm =
+        await _confirm('Delete set', 'Remove this set from the workout?');
     if (confirm != true) return;
-    final sets = _sets.where((item) => item.set.id == setId).toList();
-    if (sets.isEmpty) return;
-    final sessionId = sets.first.set.sessionId;
     await db.deleteSet(setId);
-    await _renumberSets(sessionId);
     await _load();
   }
 
-  Future<void> _renumberSets(int sessionId) async {
-    final sets = await db.setsForSession(sessionId);
-    for (var i = 0; i < sets.length; i++) {
-      final desired = i + 1;
-      if (sets[i].setNumber != desired) {
-        await db.updateSet(sets[i].copyWith(setNumber: desired));
-      }
-    }
+  Future<bool?> _confirm(String title, String body) {
+    return showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text(title),
+        content: Text(body),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
   }
+}
+
+class _CsvImportDialog extends StatefulWidget {
+  const _CsvImportDialog();
+
+  @override
+  State<_CsvImportDialog> createState() => _CsvImportDialogState();
+}
+
+class _CsvImportDialogState extends State<_CsvImportDialog> {
+  final csvText = TextEditingController();
+  final dateColumn = TextEditingController(text: 'date');
+  final exerciseColumn = TextEditingController();
+  final defaultExercise = TextEditingController(text: 'Bench press');
+  final sessionName = TextEditingController(text: 'Imported workout');
+  final defaultRest = TextEditingController(text: '2:00');
+  final repsColumns = TextEditingController();
+  final weightColumns = TextEditingController();
+  final movesColumns = TextEditingController();
+  final difficultyColumns = TextEditingController();
+  final distanceColumns = TextEditingController();
+  final durationColumns = TextEditingController();
+  final restColumns = TextEditingController();
+  ExerciseKind kind = ExerciseKind.weighted;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Import CSV'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: csvText,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                    hintText: 'Paste CSV data here',
+                    border: OutlineInputBorder()),
+              ),
+              TextField(
+                  controller: dateColumn,
+                  decoration: const InputDecoration(labelText: 'Date column')),
+              TextField(
+                  controller: exerciseColumn,
+                  decoration: const InputDecoration(
+                      labelText: 'Exercise column optional')),
+              TextField(
+                  controller: defaultExercise,
+                  decoration:
+                      const InputDecoration(labelText: 'Default exercise')),
+              DropdownButtonFormField<ExerciseKind>(
+                initialValue: kind,
+                decoration:
+                    const InputDecoration(labelText: 'Default exercise type'),
+                items: ExerciseKind.values
+                    .map((value) => DropdownMenuItem(
+                        value: value, child: Text(value.label)))
+                    .toList(),
+                onChanged: (value) => setState(() => kind = value ?? kind),
+              ),
+              TextField(
+                  controller: sessionName,
+                  decoration: const InputDecoration(labelText: 'Session name')),
+              TextField(
+                  controller: defaultRest,
+                  decoration:
+                      const InputDecoration(labelText: 'Default target rest')),
+              const SizedBox(height: 12),
+              Text('Metric columns, comma separated for set1/set2/set3 columns',
+                  style: Theme.of(context).textTheme.bodySmall),
+              TextField(
+                  controller: repsColumns,
+                  decoration: const InputDecoration(labelText: 'Reps columns')),
+              TextField(
+                  controller: weightColumns,
+                  decoration:
+                      const InputDecoration(labelText: 'Weight columns')),
+              TextField(
+                  controller: movesColumns,
+                  decoration:
+                      const InputDecoration(labelText: 'Moves columns')),
+              TextField(
+                  controller: difficultyColumns,
+                  decoration:
+                      const InputDecoration(labelText: 'Difficulty columns')),
+              TextField(
+                  controller: distanceColumns,
+                  decoration:
+                      const InputDecoration(labelText: 'Distance columns')),
+              TextField(
+                  controller: durationColumns,
+                  decoration:
+                      const InputDecoration(labelText: 'Duration columns')),
+              TextField(
+                  controller: restColumns,
+                  decoration: const InputDecoration(labelText: 'Rest columns')),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            if (csvText.text.trim().isEmpty || dateColumn.text.trim().isEmpty) {
+              return;
+            }
+            Navigator.pop(
+                context,
+                _CsvImportConfig(
+                  csvText: csvText.text,
+                  dateColumn: dateColumn.text.trim(),
+                  exerciseColumn: exerciseColumn.text.trim(),
+                  defaultExercise: defaultExercise.text.trim(),
+                  kind: kind,
+                  sessionName: sessionName.text.trim(),
+                  defaultRestSeconds: parseDuration(defaultRest.text) ?? 120,
+                  repsColumns: repsColumns.text,
+                  weightColumns: weightColumns.text,
+                  movesColumns: movesColumns.text,
+                  difficultyColumns: difficultyColumns.text,
+                  distanceColumns: distanceColumns.text,
+                  durationColumns: durationColumns.text,
+                  restColumns: restColumns.text,
+                ));
+          },
+          child: const Text('Import'),
+        ),
+      ],
+    );
+  }
+}
+
+class _CsvImportConfig {
+  _CsvImportConfig({
+    required this.csvText,
+    required this.dateColumn,
+    required this.exerciseColumn,
+    required this.defaultExercise,
+    required this.kind,
+    required this.sessionName,
+    required this.defaultRestSeconds,
+    required this.repsColumns,
+    required this.weightColumns,
+    required this.movesColumns,
+    required this.difficultyColumns,
+    required this.distanceColumns,
+    required this.durationColumns,
+    required this.restColumns,
+  });
+
+  final String csvText;
+  final String dateColumn;
+  final String exerciseColumn;
+  final String defaultExercise;
+  final ExerciseKind kind;
+  final String sessionName;
+  final int defaultRestSeconds;
+  final String repsColumns;
+  final String weightColumns;
+  final String movesColumns;
+  final String difficultyColumns;
+  final String distanceColumns;
+  final String durationColumns;
+  final String restColumns;
 }

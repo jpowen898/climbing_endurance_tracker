@@ -32,8 +32,7 @@ FlTitlesData compactTitles(String yLabel) => FlTitlesData(
       topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
       bottomTitles: const AxisTitles(
-        sideTitles: SideTitles(showTitles: true, reservedSize: 28),
-      ),
+          sideTitles: SideTitles(showTitles: true, reservedSize: 28)),
       leftTitles: AxisTitles(
         axisNameWidget: Text(yLabel),
         sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
@@ -45,25 +44,22 @@ class TrendChart extends StatelessWidget {
     super.key,
     required this.sets,
     required this.sessionDates,
-    required this.yValue,
-    required this.label,
-    this.multiLine = false,
-    this.includePoint,
+    required this.metric,
+    this.multiLine = true,
   });
 
-  final List<SetWithRoute> sets;
+  final List<SetWithExercise> sets;
   final List<DateTime> sessionDates;
-  final double Function(SetWithRoute item) yValue;
-  final String label;
+  final MetricDefinition metric;
   final bool multiLine;
-  final bool Function(SetWithRoute item)? includePoint;
 
   @override
   Widget build(BuildContext context) {
-    final filteredSets = includePoint == null
-        ? sets
-        : sets.where(includePoint!).toList();
-    if (filteredSets.isEmpty || sessionDates.isEmpty) return const Center(child: Text('No data yet'));
+    final points =
+        sets.where((item) => metric.value(item.set) != null).toList();
+    if (points.isEmpty || sessionDates.isEmpty) {
+      return const Center(child: Text('No data yet'));
+    }
     final minDate = sessionDates.reduce((a, b) => a.isBefore(b) ? a : b);
     final maxDate = sessionDates.reduce((a, b) => a.isAfter(b) ? a : b);
     final totalDays = maxDate.difference(minDate).inDays.toDouble();
@@ -77,68 +73,34 @@ class TrendChart extends StatelessWidget {
     }
 
     if (!multiLine) {
-      final spots = <FlSpot>[];
-      for (final set in filteredSets) {
-        final days = set.sessionStartedAt.difference(minDate).inDays.toDouble();
-        spots.add(FlSpot(days, yValue(set)));
-      }
-      spots.sort((a, b) => a.x.compareTo(b.x));
-      if (spots.isEmpty) return const Center(child: Text('No data yet'));
-      return Column(
-        children: [
-          Expanded(
-            child: LineChart(
-              LineChartData(
-                minX: 0,
-                maxX: totalDays,
-                minY: 0,
-                gridData: const FlGridData(show: true),
-                titlesData: FlTitlesData(
-                  topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                  bottomTitles: AxisTitles(
-                    sideTitles: SideTitles(
-                      showTitles: true,
-                      reservedSize: 60,
-                      getTitlesWidget: (value, meta) {
-                        final days = value.round();
-                        final date = minDate.add(Duration(days: days));
-                        final index = sessionDates.indexWhere((d) => d.year == date.year && d.month == date.month && d.day == date.day);
-                        if (index >= 0 && labelIndices.contains(index)) {
-                          return Text(shortDate.format(date), style: const TextStyle(fontSize: 10));
-                        }
-                        return const Text('');
-                      },
-                    ),
-                  ),
-                  leftTitles: AxisTitles(
-                    axisNameWidget: Text(label),
-                    sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
-                  ),
-                ),
-                borderData: FlBorderData(show: false),
-                lineBarsData: [
-                  LineChartBarData(
-                    spots: spots,
-                    isCurved: true,
-                    barWidth: 3,
-                    dotData: const FlDotData(show: true),
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                ],
-              ),
-            ),
+      final spots = points.map((item) {
+        final days =
+            item.sessionStartedAt.difference(minDate).inDays.toDouble();
+        return FlSpot(days, metric.value(item.set)!);
+      }).toList()
+        ..sort((a, b) => a.x.compareTo(b.x));
+      return _LineChartBody(
+        minDate: minDate,
+        sessionDates: sessionDates,
+        labelIndices: labelIndices,
+        totalDays: totalDays,
+        yLabel: metric.unit,
+        bars: [
+          LineChartBarData(
+            spots: spots,
+            isCurved: true,
+            barWidth: 3,
+            dotData: const FlDotData(show: true),
+            color: Theme.of(context).colorScheme.primary,
           ),
         ],
       );
     }
 
-    // Multi-line mode: group by set number
-    final bySetNumber = <int, List<SetWithRoute>>{};
-    for (final item in filteredSets) {
+    final bySetNumber = <int, List<SetWithExercise>>{};
+    for (final item in points) {
       bySetNumber.putIfAbsent(item.set.setNumber, () => []).add(item);
     }
-    final maxSetNumber = bySetNumber.keys.reduce((a, b) => a > b ? a : b);
     final colors = [
       Theme.of(context).colorScheme.primary,
       Theme.of(context).colorScheme.secondary,
@@ -151,93 +113,124 @@ class TrendChart extends StatelessWidget {
       Colors.pink,
       Colors.teal,
     ];
-    final lineBarsData = <LineChartBarData>[];
-    final legendItems = <Widget>[];
-
-    for (var setNum = 1; setNum <= maxSetNumber; setNum++) {
-      final setItems = bySetNumber[setNum] ?? [];
-      if (setItems.isEmpty) continue;
-      final spots = <FlSpot>[];
-      for (final item in setItems) {
-        final days = item.sessionStartedAt.difference(minDate).inDays.toDouble();
-        spots.add(FlSpot(days, yValue(item)));
-      }
-      spots.sort((a, b) => a.x.compareTo(b.x));
-      final color = colors[(setNum - 1) % colors.length];
-      lineBarsData.add(LineChartBarData(
+    final bars = <LineChartBarData>[];
+    final legend = <Widget>[];
+    final orderedSetNumbers = bySetNumber.keys.toList()..sort();
+    for (final setNumber in orderedSetNumbers) {
+      final setItems = bySetNumber[setNumber]!;
+      final spots = setItems.map((item) {
+        final days =
+            item.sessionStartedAt.difference(minDate).inDays.toDouble();
+        return FlSpot(days, metric.value(item.set)!);
+      }).toList()
+        ..sort((a, b) => a.x.compareTo(b.x));
+      final color = colors[(setNumber - 1).abs() % colors.length];
+      bars.add(LineChartBarData(
         spots: spots,
         isCurved: true,
         barWidth: 3,
         dotData: const FlDotData(show: true),
         color: color,
       ));
-      legendItems.add(Row(
+      legend.add(Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(width: 12, height: 12, color: color),
           const SizedBox(width: 4),
-          Text('Set $setNum'),
+          Text('Set $setNumber'),
         ],
       ));
     }
 
-    if (lineBarsData.isEmpty) return const Center(child: Text('No data yet'));
     return Column(
       children: [
         Expanded(
-          child: LineChart(
-            LineChartData(
-              minX: 0,
-              maxX: totalDays,
-              minY: 0,
-              gridData: const FlGridData(show: true),
-              titlesData: FlTitlesData(
-                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
-                bottomTitles: AxisTitles(
-                  sideTitles: SideTitles(
-                    showTitles: true,
-                    reservedSize: 60,
-                    getTitlesWidget: (value, meta) {
-                      final days = value.round();
-                      final date = minDate.add(Duration(days: days));
-                      final index = sessionDates.indexWhere((d) => d.year == date.year && d.month == date.month && d.day == date.day);
-                      if (index >= 0 && labelIndices.contains(index)) {
-                        return Text(shortDate.format(date), style: const TextStyle(fontSize: 10));
-                      }
-                      return const Text('');
-                    },
-                  ),
-                ),
-                leftTitles: AxisTitles(
-                  axisNameWidget: Text(label),
-                  sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
-                ),
-              ),
-              borderData: FlBorderData(show: false),
-              lineBarsData: lineBarsData,
-            ),
+          child: _LineChartBody(
+            minDate: minDate,
+            sessionDates: sessionDates,
+            labelIndices: labelIndices,
+            totalDays: totalDays,
+            yLabel: metric.unit,
+            bars: bars,
           ),
         ),
         const SizedBox(height: 8),
-        Wrap(
-          spacing: 16,
-          runSpacing: 4,
-          children: legendItems,
-        ),
+        Wrap(spacing: 16, runSpacing: 4, children: legend),
       ],
     );
   }
 }
 
-class FalloffChart extends StatelessWidget {
-  const FalloffChart({super.key, required this.sets});
+class _LineChartBody extends StatelessWidget {
+  const _LineChartBody({
+    required this.minDate,
+    required this.sessionDates,
+    required this.labelIndices,
+    required this.totalDays,
+    required this.yLabel,
+    required this.bars,
+  });
 
-  final List<SetWithRoute> sets;
+  final DateTime minDate;
+  final List<DateTime> sessionDates;
+  final Set<int> labelIndices;
+  final double totalDays;
+  final String yLabel;
+  final List<LineChartBarData> bars;
 
   @override
   Widget build(BuildContext context) {
-    final grouped = <int, List<SetWithRoute>>{};
+    return LineChart(
+      LineChartData(
+        minX: 0,
+        maxX: totalDays == 0 ? 1 : totalDays,
+        minY: 0,
+        gridData: const FlGridData(show: true),
+        titlesData: FlTitlesData(
+          topTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          rightTitles:
+              const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+          bottomTitles: AxisTitles(
+            sideTitles: SideTitles(
+              showTitles: true,
+              reservedSize: 60,
+              getTitlesWidget: (value, meta) {
+                final days = value.round();
+                final date = minDate.add(Duration(days: days));
+                final index = sessionDates.indexWhere((d) =>
+                    d.year == date.year &&
+                    d.month == date.month &&
+                    d.day == date.day);
+                if (index >= 0 && labelIndices.contains(index)) {
+                  return Text(shortDate.format(date),
+                      style: const TextStyle(fontSize: 10));
+                }
+                return const Text('');
+              },
+            ),
+          ),
+          leftTitles: AxisTitles(
+            axisNameWidget: Text(yLabel),
+            sideTitles: const SideTitles(showTitles: true, reservedSize: 42),
+          ),
+        ),
+        borderData: FlBorderData(show: false),
+        lineBarsData: bars,
+      ),
+    );
+  }
+}
+
+class FalloffChart extends StatelessWidget {
+  const FalloffChart({super.key, required this.sets, required this.metric});
+
+  final List<SetWithExercise> sets;
+  final MetricDefinition metric;
+
+  @override
+  Widget build(BuildContext context) {
+    final grouped = <int, List<SetWithExercise>>{};
     for (final item in sets) {
       grouped.putIfAbsent(item.set.sessionId, () => []).add(item);
     }
@@ -245,10 +238,12 @@ class FalloffChart extends StatelessWidget {
     var x = 0;
     for (final group in grouped.values) {
       group.sort((a, b) => a.set.setNumber.compareTo(b.set.setNumber));
-      if (group.isEmpty || group.first.set.movesCompleted == 0) continue;
-      final first = group.first.set.movesCompleted;
+      final firstValue = group.isEmpty ? null : metric.value(group.first.set);
+      if (firstValue == null || firstValue == 0) continue;
       for (final item in group) {
-        final falloff = (first - item.set.movesCompleted) / first * 100;
+        final value = metric.value(item.set);
+        if (value == null) continue;
+        final falloff = (firstValue - value) / firstValue * 100;
         spots.add(FlSpot(x.toDouble(), falloff));
         x++;
       }
@@ -271,13 +266,14 @@ class FalloffChart extends StatelessWidget {
 }
 
 class RestFalloffChart extends StatelessWidget {
-  const RestFalloffChart({super.key, required this.sets});
+  const RestFalloffChart({super.key, required this.sets, required this.metric});
 
-  final List<SetWithRoute> sets;
+  final List<SetWithExercise> sets;
+  final MetricDefinition metric;
 
   @override
   Widget build(BuildContext context) {
-    final bySession = <int, List<SetWithRoute>>{};
+    final bySession = <int, List<SetWithExercise>>{};
     for (final item in sets) {
       bySession.putIfAbsent(item.set.sessionId, () => []).add(item);
     }
@@ -287,10 +283,15 @@ class RestFalloffChart extends StatelessWidget {
       for (var i = 1; i < group.length; i++) {
         final prev = group[i - 1].set;
         final current = group[i].set;
-        if (prev.movesCompleted == 0 || prev.restAfterSeconds == null) continue;
-        final falloff = (prev.movesCompleted - current.movesCompleted) /
-            prev.movesCompleted *
-            100;
+        final previousValue = metric.value(prev);
+        final currentValue = metric.value(current);
+        if (previousValue == null ||
+            previousValue == 0 ||
+            currentValue == null ||
+            prev.restAfterSeconds == null) {
+          continue;
+        }
+        final falloff = (previousValue - currentValue) / previousValue * 100;
         spots.add(FlSpot(prev.restAfterSeconds!.toDouble() / 60, falloff));
       }
     }
@@ -304,9 +305,7 @@ class RestFalloffChart extends StatelessWidget {
                 spot.x,
                 spot.y,
                 dotPainter: FlDotCirclePainter(
-                  radius: 5,
-                  color: Theme.of(context).colorScheme.tertiary,
-                ),
+                    radius: 5, color: Theme.of(context).colorScheme.tertiary),
               ))
           .toList(),
     ));

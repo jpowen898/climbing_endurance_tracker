@@ -24,6 +24,121 @@ A local-first Flutter app for recording spray wall endurance sessions.
 flutter pub get
 ```
 
+
+## Build and Test on Ubuntu
+
+Use these steps when developing directly on a native Ubuntu desktop.
+
+### Ubuntu Prerequisites
+
+Install Flutter, then install the Linux desktop build toolchain:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev lld libsqlite3-dev
+```
+
+Enable Flutter Linux desktop support and verify the toolchain:
+
+```bash
+flutter config --enable-linux-desktop
+flutter doctor -v
+```
+
+Install project dependencies from the repository root:
+
+```bash
+flutter pub get
+```
+
+### Static Checks and Tests
+
+Run the analyzer:
+
+```bash
+flutter analyze
+```
+
+Run the widget/unit test suite:
+
+```bash
+flutter test
+```
+
+### Run on Ubuntu Desktop
+
+If the repository does not have a `linux/` directory yet, generate the Linux runner once:
+
+```bash
+flutter create --platforms=linux .
+```
+
+List desktop devices:
+
+```bash
+flutter devices
+```
+
+Run the app on the native Linux desktop target:
+
+```bash
+flutter run -d linux
+```
+
+### Build a Linux Bundle
+
+Build a release bundle:
+
+```bash
+flutter build linux --release
+```
+
+The executable bundle is written under:
+
+```text
+build/linux/x64/release/bundle/
+```
+
+Run the built app directly:
+
+```bash
+build/linux/x64/release/bundle/climb_endurance
+```
+
+### Snap Flutter Linker Error
+
+If `flutter run -d linux` fails with an error like this:
+
+```text
+Failed to find any of [ld.lld, ld] in LocalDirectory: '/snap/flutter/.../usr/lib/llvm-10/bin'
+```
+
+then the Dart code has compiled far enough to hit a Flutter Snap toolchain
+problem. This project pins `sqflite_common_ffi` to `2.3.6` and overrides
+`sqlite3` to `2.7.6` to avoid the newer Dart native-assets linker path that
+triggers this Snap failure. Keep those pins unless you are also moving off the
+Snap Flutter SDK or have confirmed the native-assets linker works locally.
+
+For Linux desktop builds, prefer the official Flutter SDK archive or git install
+instead of the Snap package:
+
+```bash
+mkdir -p ~/development
+git clone https://github.com/flutter/flutter.git -b stable ~/development/flutter
+echo 'export PATH="$HOME/development/flutter/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+which flutter
+flutter doctor -v
+```
+
+`which flutter` should point at `~/development/flutter/bin/flutter`, not
+`/snap/bin/flutter`. After switching SDKs, rerun:
+
+```bash
+flutter pub get
+flutter run -d linux
+```
+
 ### Build the App
 
 To build for Android:

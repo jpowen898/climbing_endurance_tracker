@@ -13,7 +13,7 @@ void main() {
     await tester.pumpWidget(const ClimbEnduranceApp());
     await tester.pumpAndSettle();
 
-    expect(find.text('Climb Endurance'), findsOneWidget);
+    expect(find.text('Workout Tracker'), findsOneWidget);
     expect(find.text('Ready to record'), findsOneWidget);
     expect(find.text('Start workout'), findsOneWidget);
   });
