@@ -22,7 +22,7 @@ class _ExerciseDialogState extends State<ExerciseDialog> {
   void initState() {
     super.initState();
     final exercise = widget.exercise;
-    kind = exercise?.kind ?? ExerciseKind.weighted;
+    kind = exercise?.kind ?? ExerciseKind.strength;
     name.text = exercise?.name ?? '';
     notes.text = exercise?.notes ?? '';
     plotMetrics = {...(exercise?.plotMetrics ?? kind.defaultMetrics)};
@@ -202,6 +202,7 @@ class WorkoutPlanItemDialog extends StatefulWidget {
 class _WorkoutPlanItemDialogState extends State<WorkoutPlanItemDialog> {
   int? exerciseId;
   final sets = TextEditingController(text: '3');
+  final cycleGroup = TextEditingController(text: '0');
   final rest = TextEditingController(text: '2:00');
   final warmupPercent = TextEditingController(text: '50');
   final notes = TextEditingController();
@@ -222,6 +223,7 @@ class _WorkoutPlanItemDialogState extends State<WorkoutPlanItemDialog> {
         (widget.exercises.isEmpty ? null : widget.exercises.first.id);
     if (item != null) {
       sets.text = '${item.sets}';
+      cycleGroup.text = item.cycleGroup.toString();
       rest.text = formatDuration(item.targetRestSeconds);
       includeWarmup = item.includeWarmup;
       warmupPercent.text =
@@ -233,7 +235,7 @@ class _WorkoutPlanItemDialogState extends State<WorkoutPlanItemDialog> {
   @override
   Widget build(BuildContext context) {
     final exercise = selectedExercise;
-    final weighted = exercise?.kind == ExerciseKind.weighted;
+    final weighted = exercise?.kind == ExerciseKind.strength;
     return AlertDialog(
       title: Text(
           widget.item == null ? 'Add exercise step' : 'Edit exercise step'),
@@ -255,6 +257,15 @@ class _WorkoutPlanItemDialogState extends State<WorkoutPlanItemDialog> {
               controller: sets,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(labelText: 'Sets'),
+            ),
+            TextField(
+              controller: cycleGroup,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Cycle group',
+                helperText:
+                    '0 runs straight; adjacent matching groups cycle together',
+              ),
             ),
             TextField(
               controller: rest,
@@ -299,6 +310,7 @@ class _WorkoutPlanItemDialogState extends State<WorkoutPlanItemDialog> {
                     widget.item?.sequenceIndex ?? widget.sequenceIndex,
                 sets: int.tryParse(sets.text) ?? 3,
                 targetRestSeconds: parseDuration(rest.text) ?? 120,
+                cycleGroup: int.tryParse(cycleGroup.text) ?? 0,
                 includeWarmup: includeWarmup && weighted,
                 warmupPercent:
                     ((double.tryParse(warmupPercent.text) ?? 50) / 100)
@@ -547,10 +559,12 @@ class _SetEntryDialogState extends State<SetEntryDialog> {
   final reps = TextEditingController();
   final weight = TextEditingController();
   final moves = TextEditingController();
+  final routeType = TextEditingController();
   final difficulty = TextEditingController();
   final distance = TextEditingController();
   final duration = TextEditingController();
   final notes = TextEditingController();
+  bool completedRoute = false;
 
   @override
   void initState() {
@@ -562,7 +576,9 @@ class _SetEntryDialogState extends State<SetEntryDialog> {
             ? ''
             : widget.suggestedWeight!.toStringAsFixed(1));
     moves.text = set?.moves?.toString() ?? '';
+    routeType.text = set?.routeType ?? '';
     difficulty.text = set?.difficulty ?? '';
+    completedRoute = set?.completedRoute ?? false;
     distance.text = set?.distance?.toString() ?? '';
     duration.text =
         formatDuration(set?.setDurationSeconds ?? widget.elapsedSeconds);
@@ -602,11 +618,24 @@ class _SetEntryDialogState extends State<SetEntryDialog> {
                   autofocus: true,
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(labelText: 'Moves')),
+            if (exercise.recordsRouteType)
+              TextField(
+                  controller: routeType,
+                  decoration:
+                      const InputDecoration(labelText: 'Route type/color')),
             if (exercise.recordsDifficulty)
               TextField(
                   controller: difficulty,
                   autofocus: true,
                   decoration: const InputDecoration(labelText: 'Difficulty')),
+            if (exercise.recordsRouteCompletion)
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: completedRoute,
+                title: const Text('Finished route'),
+                onChanged: (value) =>
+                    setState(() => completedRoute = value ?? false),
+              ),
             if (exercise.recordsDistance)
               TextField(
                   controller: distance,
@@ -633,9 +662,13 @@ class _SetEntryDialogState extends State<SetEntryDialog> {
                 reps: int.tryParse(reps.text),
                 weight: double.tryParse(weight.text),
                 moves: int.tryParse(moves.text),
+                routeType: routeType.text.trim().isEmpty
+                    ? null
+                    : routeType.text.trim(),
                 difficulty: difficulty.text.trim().isEmpty
                     ? null
                     : difficulty.text.trim(),
+                completedRoute: completedRoute,
                 distance: double.tryParse(distance.text),
                 notes: notes.text.trim(),
               ),
@@ -654,7 +687,9 @@ class SetEntryResult {
     this.reps,
     this.weight,
     this.moves,
+    this.routeType,
     this.difficulty,
+    this.completedRoute = false,
     this.distance,
     required this.notes,
   });
@@ -663,7 +698,9 @@ class SetEntryResult {
   final int? reps;
   final double? weight;
   final int? moves;
+  final String? routeType;
   final String? difficulty;
+  final bool completedRoute;
   final double? distance;
   final String notes;
 }

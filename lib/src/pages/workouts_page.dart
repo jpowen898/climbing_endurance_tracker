@@ -113,7 +113,8 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
       child: ExpansionTile(
         key: ValueKey('plan-${plan.id}'),
         title: Text(plan.name),
-        subtitle: Text('${steps.length} exercises - ${plan.orderLabel}'),
+        subtitle: Text(
+            '${steps.length} exercises - ${_planCycleSummary(plan, steps)}'),
         childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
         children: [
           if (steps.isEmpty)
@@ -139,9 +140,7 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
                   dense: true,
                   leading: Text('${index + 1}'),
                   title: Text(step.exercise.name),
-                  subtitle: Text(
-                    '${step.item.sets} sets - rest ${formatDuration(step.item.targetRestSeconds)}${step.item.includeWarmup ? ' - warmup ${((step.item.warmupPercent ?? 0.5) * 100).round()}%' : ''}',
-                  ),
+                  subtitle: Text(_stepSubtitle(step)),
                   trailing: Wrap(
                     spacing: 4,
                     children: [
@@ -183,6 +182,33 @@ class _WorkoutsPageState extends State<WorkoutsPage> {
         ],
       ),
     );
+  }
+
+  String _planCycleSummary(WorkoutPlan plan, List<WorkoutPlanStep> steps) {
+    final groups = steps
+        .map((step) => step.item.cycleGroup)
+        .where((group) => group > 0)
+        .toSet()
+        .toList()
+      ..sort();
+    if (groups.isNotEmpty) {
+      return 'mixed order - cycle groups ${groups.join(', ')}';
+    }
+    return plan.orderLabel;
+  }
+
+  String _stepSubtitle(WorkoutPlanStep step) {
+    final parts = <String>[
+      '${step.item.sets} sets',
+      'rest ${formatDuration(step.item.targetRestSeconds)}',
+    ];
+    if (step.item.cycleGroup > 0) {
+      parts.add('cycle group ${step.item.cycleGroup}');
+    }
+    if (step.item.includeWarmup) {
+      parts.add('warmup ${((step.item.warmupPercent ?? 0.5) * 100).round()}%');
+    }
+    return parts.join(' - ');
   }
 
   Future<void> _addExercise() async {

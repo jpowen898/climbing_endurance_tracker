@@ -109,9 +109,17 @@ class _HeaderRow extends StatelessWidget {
           const SizedBox(width: 12),
           _header('Moves', 80)
         ],
+        if (_showMetric('routeType')) ...[
+          const SizedBox(width: 12),
+          _header('Route', 110)
+        ],
         if (_showMetric('difficulty')) ...[
           const SizedBox(width: 12),
           _header('Difficulty', 100)
+        ],
+        if (_showMetric('routeCompletion')) ...[
+          const SizedBox(width: 12),
+          _header('Finished', 92)
         ],
         if (_showMetric('distance')) ...[
           const SizedBox(width: 12),
@@ -158,8 +166,10 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
   late final TextEditingController repsController;
   late final TextEditingController weightController;
   late final TextEditingController movesController;
+  late final TextEditingController routeTypeController;
   late final TextEditingController difficultyController;
   late final TextEditingController distanceController;
+  late bool completedRoute;
   final focusNodes = <FocusNode>[];
 
   @override
@@ -171,9 +181,11 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
     repsController = TextEditingController();
     weightController = TextEditingController();
     movesController = TextEditingController();
+    routeTypeController = TextEditingController();
     difficultyController = TextEditingController();
     distanceController = TextEditingController();
-    for (var i = 0; i < 7; i++) {
+    completedRoute = widget.set.completedRoute;
+    for (var i = 0; i < 8; i++) {
       focusNodes.add(FocusNode()..addListener(_onFocusChange));
     }
     _fillControllers();
@@ -196,7 +208,9 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
     repsController.text = widget.set.reps?.toString() ?? '';
     weightController.text = widget.set.weight?.toString() ?? '';
     movesController.text = widget.set.moves?.toString() ?? '';
+    routeTypeController.text = widget.set.routeType ?? '';
     difficultyController.text = widget.set.difficulty ?? '';
+    completedRoute = widget.set.completedRoute;
     distanceController.text = widget.set.distance?.toString() ?? '';
   }
 
@@ -207,6 +221,7 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
     repsController.dispose();
     weightController.dispose();
     movesController.dispose();
+    routeTypeController.dispose();
     difficultyController.dispose();
     distanceController.dispose();
     for (final node in focusNodes) {
@@ -245,9 +260,13 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
       moves: movesController.text.trim().isEmpty
           ? null
           : int.tryParse(movesController.text),
+      routeType: routeTypeController.text.trim().isEmpty
+          ? null
+          : routeTypeController.text.trim(),
       difficulty: difficultyController.text.trim().isEmpty
           ? null
           : difficultyController.text.trim(),
+      completedRoute: completedRoute,
       distance: distanceController.text.trim().isEmpty
           ? null
           : double.tryParse(distanceController.text),
@@ -319,14 +338,23 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
           _cell(movesController, focusNodes[4], TextInputType.number,
               exercise?.recordsMoves == true ? '' : '-'),
         ],
+        if (_showMetric('routeType')) ...[
+          const SizedBox(width: 12),
+          _cell(routeTypeController, focusNodes[5], TextInputType.text,
+              exercise?.recordsRouteType == true ? '' : '-'),
+        ],
         if (_showMetric('difficulty')) ...[
           const SizedBox(width: 12),
-          _cell(difficultyController, focusNodes[5], TextInputType.text,
+          _cell(difficultyController, focusNodes[6], TextInputType.text,
               exercise?.recordsDifficulty == true ? '' : '-'),
+        ],
+        if (_showMetric('routeCompletion')) ...[
+          const SizedBox(width: 12),
+          _checkboxCell(exercise?.recordsRouteCompletion == true),
         ],
         if (_showMetric('distance')) ...[
           const SizedBox(width: 12),
-          _cell(distanceController, focusNodes[6], TextInputType.number,
+          _cell(distanceController, focusNodes[7], TextInputType.number,
               exercise?.recordsDistance == true ? '' : '-'),
         ],
         const SizedBox(width: 12),
@@ -339,6 +367,21 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _checkboxCell(bool enabled) {
+    return SizedBox(
+      width: 92,
+      child: Checkbox(
+        value: completedRoute,
+        onChanged: enabled
+            ? (value) {
+                setState(() => completedRoute = value ?? false);
+                _updateSet();
+              }
+            : null,
+      ),
     );
   }
 

@@ -14,7 +14,7 @@ class ClimbDatabase {
     final path = p.join(await getDatabasesPath(), 'climb_endurance.sqlite');
     _db = await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onCreate: _create,
       onUpgrade: _upgrade,
       onOpen: (db) async {
@@ -57,6 +57,7 @@ class ClimbDatabase {
         sequence_index INTEGER NOT NULL,
         sets INTEGER NOT NULL,
         target_rest_seconds INTEGER NOT NULL,
+        cycle_group INTEGER NOT NULL DEFAULT 0,
         include_warmup INTEGER NOT NULL DEFAULT 0,
         warmup_percent REAL,
         notes TEXT NOT NULL DEFAULT ''
@@ -90,7 +91,9 @@ class ClimbDatabase {
         reps INTEGER,
         weight REAL,
         moves INTEGER,
+        route_type TEXT,
         difficulty TEXT,
+        completed_route INTEGER NOT NULL DEFAULT 0,
         distance REAL,
         notes TEXT NOT NULL DEFAULT ''
       )
@@ -106,6 +109,9 @@ class ClimbDatabase {
     }
     if (oldVersion < 4) {
       await _upgradeToV4(db);
+    }
+    if (oldVersion < 5) {
+      await _upgradeToV5(db);
     }
   }
 
@@ -153,7 +159,7 @@ class ClimbDatabase {
           'exercises',
           Exercise(
             name: 'Endurance climb',
-            kind: ExerciseKind.climbingEndurance,
+            kind: ExerciseKind.climbing,
             createdAt: DateTime.fromMillisecondsSinceEpoch(now),
           ).toMap());
     }
@@ -174,13 +180,15 @@ class ClimbDatabase {
         INSERT INTO sets (
           id, session_id, exercise_id, plan_item_id, sequence_index, set_number,
           is_warmup, started_at, ended_at, set_duration_seconds, rest_after_seconds,
-          target_rest_seconds, reps, weight, moves, difficulty, distance, notes
+          target_rest_seconds, reps, weight, moves, route_type, difficulty,
+          completed_route, distance, notes
         )
         SELECT sets_legacy.id, sets_legacy.session_id,
                COALESCE(exercises.id, $fallbackExercise), NULL, 0, sets_legacy.set_number,
                0, sets_legacy.started_at, sets_legacy.ended_at, sets_legacy.wall_time_seconds,
                sets_legacy.rest_after_seconds, sets_legacy.target_rest_seconds,
-               NULL, NULL, sets_legacy.moves_completed, NULL, NULL, sets_legacy.notes
+               NULL, NULL, sets_legacy.moves_completed, NULL, NULL, 0, NULL,
+               sets_legacy.notes
         FROM sets_legacy
         LEFT JOIN exercises ON exercises.id = sets_legacy.route_id
       ''');
@@ -199,6 +207,21 @@ class ClimbDatabase {
     }
   }
 
+  Future<void> _upgradeToV5(Database db) async {
+    if (!await _columnExists(db, 'workout_plan_items', 'cycle_group')) {
+      await db.execute(
+          'ALTER TABLE workout_plan_items ADD COLUMN cycle_group INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!await _columnExists(db, 'sets', 'route_type')) {
+      await db.execute('ALTER TABLE sets ADD COLUMN route_type TEXT');
+    }
+    if (!await _columnExists(db, 'sets', 'completed_route')) {
+      await db.execute(
+          'ALTER TABLE sets ADD COLUMN completed_route INTEGER NOT NULL DEFAULT 0');
+    }
+    await _seedDefaults(db);
+  }
+
   Future<bool> _columnExists(
       Database db, String tableName, String columnName) async {
     final columns = await db.rawQuery('PRAGMA table_info($tableName)');
@@ -214,27 +237,25 @@ class ClimbDatabase {
   }
 
   Future<void> _seedDefaults(Database db) async {
-    if ((await db.query('exercises', limit: 1)).isEmpty) {
-      final now = DateTime.now();
-      for (final exercise in [
-        Exercise(
-            name: 'Bench press', kind: ExerciseKind.weighted, createdAt: now),
-        Exercise(
-            name: 'Pullups', kind: ExerciseKind.bodyweight, createdAt: now),
-        Exercise(
-            name: 'Endurance climb',
-            kind: ExerciseKind.climbingEndurance,
-            createdAt: now),
-        Exercise(
-            name: 'Boulder problem',
-            kind: ExerciseKind.climbingPower,
-            createdAt: now),
-        Exercise(name: 'Run', kind: ExerciseKind.cardio, createdAt: now),
-        Exercise(name: 'Plank', kind: ExerciseKind.staticHold, createdAt: now),
-      ]) {
-        await db.insert('exercises', exercise.toMap(),
-            conflictAlgorithm: ConflictAlgorithm.ignore);
-      }
+    final now = DateTime.now();
+    for (final exercise in [
+      Exercise(
+          name: 'Bench press', kind: ExerciseKind.strength, createdAt: now),
+      Exercise(name: 'Dips', kind: ExerciseKind.calisthenic, createdAt: now),
+      Exercise(
+          name: 'Bicep curls', kind: ExerciseKind.strength, createdAt: now),
+      Exercise(name: 'Pullups', kind: ExerciseKind.calisthenic, createdAt: now),
+      Exercise(
+          name: 'Climb endurance', kind: ExerciseKind.climbing, createdAt: now),
+      Exercise(name: 'Bouldering', kind: ExerciseKind.climbing, createdAt: now),
+      Exercise(
+          name: 'Lead climbing', kind: ExerciseKind.climbing, createdAt: now),
+      Exercise(name: 'Row machine', kind: ExerciseKind.aerobic, createdAt: now),
+      Exercise(name: 'Run', kind: ExerciseKind.aerobic, createdAt: now),
+      Exercise(name: 'Plank', kind: ExerciseKind.isometric, createdAt: now),
+    ]) {
+      await db.insert('exercises', exercise.toMap(),
+          conflictAlgorithm: ConflictAlgorithm.ignore);
     }
     if ((await db.query('workout_plans', limit: 1)).isEmpty) {
       final planId = await db.insert(
@@ -256,7 +277,7 @@ class ClimbDatabase {
               targetRestSeconds: 120,
               includeWarmup:
                   exerciseKindFromDb(exercises[i]['kind'] as String) ==
-                      ExerciseKind.weighted,
+                      ExerciseKind.strength,
               warmupPercent: 0.5,
             ).toMap());
       }

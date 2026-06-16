@@ -58,8 +58,11 @@ class _RawDataPageState extends State<RawDataPage> {
       final repsColumns = _columnIndexes(config.repsColumns, lookup);
       final weightColumns = _columnIndexes(config.weightColumns, lookup);
       final movesColumns = _columnIndexes(config.movesColumns, lookup);
+      final routeTypeColumns = _columnIndexes(config.routeTypeColumns, lookup);
       final difficultyColumns =
           _columnIndexes(config.difficultyColumns, lookup);
+      final completedRouteColumns =
+          _columnIndexes(config.completedRouteColumns, lookup);
       final distanceColumns = _columnIndexes(config.distanceColumns, lookup);
       final durationColumns = _columnIndexes(config.durationColumns, lookup);
       final restColumns = _columnIndexes(config.restColumns, lookup);
@@ -67,7 +70,9 @@ class _RawDataPageState extends State<RawDataPage> {
         repsColumns,
         weightColumns,
         movesColumns,
+        routeTypeColumns,
         difficultyColumns,
+        completedRouteColumns,
         distanceColumns,
         durationColumns,
         restColumns,
@@ -102,10 +107,18 @@ class _RawDataPageState extends State<RawDataPage> {
           final reps = _intFrom(row, repsColumns, i);
           final weight = _doubleFrom(row, weightColumns, i);
           final moves = _intFrom(row, movesColumns, i);
+          final routeType = _stringFrom(row, routeTypeColumns, i);
           final difficulty = _stringFrom(row, difficultyColumns, i);
+          final completedRoute = _boolFrom(row, completedRouteColumns, i);
           final distance = _doubleFrom(row, distanceColumns, i);
-          final hasMetric = [reps, weight, moves, difficulty, distance]
-                  .any((value) => value != null) ||
+          final hasMetric = [
+                reps,
+                weight,
+                moves,
+                routeType,
+                difficulty,
+                distance
+              ].any((value) => value != null) ||
               duration > 0 ||
               rest != null;
           if (!hasMetric) continue;
@@ -123,7 +136,9 @@ class _RawDataPageState extends State<RawDataPage> {
             reps: reps,
             weight: weight,
             moves: moves,
+            routeType: routeType,
             difficulty: difficulty,
+            completedRoute: completedRoute ?? false,
             distance: distance,
           ));
           setNumber++;
@@ -160,6 +175,12 @@ class _RawDataPageState extends State<RawDataPage> {
     final column = _columnFor(columns, index);
     if (column == null || row.length <= column) return null;
     return double.tryParse(row[column].toString().trim());
+  }
+
+  bool? _boolFrom(List<dynamic> row, List<int> columns, int index) {
+    final value = _stringFrom(row, columns, index)?.toLowerCase();
+    if (value == null) return null;
+    return value == 'true' || value == 'yes' || value == 'y' || value == '1';
   }
 
   String? _stringFrom(List<dynamic> row, List<int> columns, int index) {
@@ -375,11 +396,13 @@ class _CsvImportDialogState extends State<_CsvImportDialog> {
   final repsColumns = TextEditingController();
   final weightColumns = TextEditingController();
   final movesColumns = TextEditingController();
+  final routeTypeColumns = TextEditingController();
   final difficultyColumns = TextEditingController();
+  final completedRouteColumns = TextEditingController();
   final distanceColumns = TextEditingController();
   final durationColumns = TextEditingController();
   final restColumns = TextEditingController();
-  ExerciseKind kind = ExerciseKind.weighted;
+  ExerciseKind kind = ExerciseKind.strength;
 
   @override
   Widget build(BuildContext context) {
@@ -441,9 +464,17 @@ class _CsvImportDialogState extends State<_CsvImportDialog> {
                   decoration:
                       const InputDecoration(labelText: 'Moves columns')),
               TextField(
+                  controller: routeTypeColumns,
+                  decoration: const InputDecoration(
+                      labelText: 'Route type/color columns')),
+              TextField(
                   controller: difficultyColumns,
                   decoration:
                       const InputDecoration(labelText: 'Difficulty columns')),
+              TextField(
+                  controller: completedRouteColumns,
+                  decoration: const InputDecoration(
+                      labelText: 'Finished route columns')),
               TextField(
                   controller: distanceColumns,
                   decoration:
@@ -481,7 +512,9 @@ class _CsvImportDialogState extends State<_CsvImportDialog> {
                   repsColumns: repsColumns.text,
                   weightColumns: weightColumns.text,
                   movesColumns: movesColumns.text,
+                  routeTypeColumns: routeTypeColumns.text,
                   difficultyColumns: difficultyColumns.text,
+                  completedRouteColumns: completedRouteColumns.text,
                   distanceColumns: distanceColumns.text,
                   durationColumns: durationColumns.text,
                   restColumns: restColumns.text,
@@ -506,7 +539,9 @@ class _CsvImportConfig {
     required this.repsColumns,
     required this.weightColumns,
     required this.movesColumns,
+    required this.routeTypeColumns,
     required this.difficultyColumns,
+    required this.completedRouteColumns,
     required this.distanceColumns,
     required this.durationColumns,
     required this.restColumns,
@@ -522,7 +557,9 @@ class _CsvImportConfig {
   final String repsColumns;
   final String weightColumns;
   final String movesColumns;
+  final String routeTypeColumns;
   final String difficultyColumns;
+  final String completedRouteColumns;
   final String distanceColumns;
   final String durationColumns;
   final String restColumns;

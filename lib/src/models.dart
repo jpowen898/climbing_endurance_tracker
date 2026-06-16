@@ -1,30 +1,27 @@
 import 'dart:convert';
 
 enum ExerciseKind {
-  weighted,
-  bodyweight,
-  climbingEndurance,
-  climbingPower,
-  cardio,
-  staticHold,
+  strength,
+  calisthenic,
+  climbing,
+  aerobic,
+  isometric,
   custom,
 }
 
 extension ExerciseKindDetails on ExerciseKind {
   String get label {
     switch (this) {
-      case ExerciseKind.weighted:
-        return 'Weighted';
-      case ExerciseKind.bodyweight:
-        return 'Body weight';
-      case ExerciseKind.climbingEndurance:
-        return 'Climbing endurance';
-      case ExerciseKind.climbingPower:
-        return 'Climbing power';
-      case ExerciseKind.cardio:
-        return 'Cardio';
-      case ExerciseKind.staticHold:
-        return 'Static hold';
+      case ExerciseKind.strength:
+        return 'Strength';
+      case ExerciseKind.calisthenic:
+        return 'Calisthenic';
+      case ExerciseKind.climbing:
+        return 'Climbing';
+      case ExerciseKind.aerobic:
+        return 'Aerobic';
+      case ExerciseKind.isometric:
+        return 'Isometric';
       case ExerciseKind.custom:
         return 'Custom';
     }
@@ -32,17 +29,22 @@ extension ExerciseKindDetails on ExerciseKind {
 
   List<String> get defaultMetrics {
     switch (this) {
-      case ExerciseKind.weighted:
+      case ExerciseKind.strength:
         return ['reps', 'weight', 'volume', 'duration', 'rest'];
-      case ExerciseKind.bodyweight:
+      case ExerciseKind.calisthenic:
         return ['reps', 'duration', 'rest'];
-      case ExerciseKind.climbingEndurance:
-        return ['moves', 'movesPerMinute', 'duration', 'rest'];
-      case ExerciseKind.climbingPower:
-        return ['difficulty', 'duration', 'rest'];
-      case ExerciseKind.cardio:
+      case ExerciseKind.climbing:
+        return [
+          'moves',
+          'difficulty',
+          'routeCompletion',
+          'movesPerMinute',
+          'duration',
+          'rest',
+        ];
+      case ExerciseKind.aerobic:
         return ['distance', 'duration', 'pace', 'rest'];
-      case ExerciseKind.staticHold:
+      case ExerciseKind.isometric:
         return ['duration', 'rest'];
       case ExerciseKind.custom:
         return ['duration', 'rest'];
@@ -51,6 +53,19 @@ extension ExerciseKindDetails on ExerciseKind {
 }
 
 ExerciseKind exerciseKindFromDb(String value) {
+  switch (value) {
+    case 'weighted':
+      return ExerciseKind.strength;
+    case 'bodyweight':
+      return ExerciseKind.calisthenic;
+    case 'climbingEndurance':
+    case 'climbingPower':
+      return ExerciseKind.climbing;
+    case 'cardio':
+      return ExerciseKind.aerobic;
+    case 'staticHold':
+      return ExerciseKind.isometric;
+  }
   return ExerciseKind.values.firstWhere(
     (kind) => kind.name == value,
     orElse: () => ExerciseKind.custom,
@@ -75,11 +90,13 @@ class Exercise {
   final DateTime createdAt;
 
   bool get recordsReps =>
-      kind == ExerciseKind.weighted || kind == ExerciseKind.bodyweight;
-  bool get recordsWeight => kind == ExerciseKind.weighted;
-  bool get recordsMoves => kind == ExerciseKind.climbingEndurance;
-  bool get recordsDifficulty => kind == ExerciseKind.climbingPower;
-  bool get recordsDistance => kind == ExerciseKind.cardio;
+      kind == ExerciseKind.strength || kind == ExerciseKind.calisthenic;
+  bool get recordsWeight => kind == ExerciseKind.strength;
+  bool get recordsMoves => kind == ExerciseKind.climbing;
+  bool get recordsDifficulty => kind == ExerciseKind.climbing;
+  bool get recordsRouteType => kind == ExerciseKind.climbing;
+  bool get recordsRouteCompletion => kind == ExerciseKind.climbing;
+  bool get recordsDistance => kind == ExerciseKind.aerobic;
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -141,7 +158,7 @@ class WorkoutPlan {
   final bool cycleExercises;
   final DateTime createdAt;
 
-  String get orderLabel => cycleExercises ? 'Cycle exercises' : 'Straight sets';
+  String get orderLabel => cycleExercises ? 'Cycle all exercises' : 'Mixed order';
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -185,6 +202,7 @@ class WorkoutPlanItem {
     required this.sequenceIndex,
     required this.sets,
     required this.targetRestSeconds,
+    this.cycleGroup = 0,
     this.includeWarmup = false,
     this.warmupPercent,
     this.notes = '',
@@ -196,6 +214,7 @@ class WorkoutPlanItem {
   final int sequenceIndex;
   final int sets;
   final int targetRestSeconds;
+  final int cycleGroup;
   final bool includeWarmup;
   final double? warmupPercent;
   final String notes;
@@ -207,6 +226,7 @@ class WorkoutPlanItem {
         'sequence_index': sequenceIndex,
         'sets': sets,
         'target_rest_seconds': targetRestSeconds,
+        'cycle_group': cycleGroup,
         'include_warmup': includeWarmup ? 1 : 0,
         'warmup_percent': warmupPercent,
         'notes': notes,
@@ -219,6 +239,7 @@ class WorkoutPlanItem {
         sequenceIndex: map['sequence_index'] as int,
         sets: map['sets'] as int,
         targetRestSeconds: map['target_rest_seconds'] as int,
+        cycleGroup: map['cycle_group'] as int? ?? 0,
         includeWarmup: (map['include_warmup'] as int? ?? 0) == 1,
         warmupPercent: (map['warmup_percent'] as num?)?.toDouble(),
         notes: map['notes'] as String? ?? '',
@@ -231,6 +252,7 @@ class WorkoutPlanItem {
     int? sequenceIndex,
     int? sets,
     int? targetRestSeconds,
+    int? cycleGroup,
     bool? includeWarmup,
     double? warmupPercent,
     String? notes,
@@ -242,6 +264,7 @@ class WorkoutPlanItem {
       sequenceIndex: sequenceIndex ?? this.sequenceIndex,
       sets: sets ?? this.sets,
       targetRestSeconds: targetRestSeconds ?? this.targetRestSeconds,
+      cycleGroup: cycleGroup ?? this.cycleGroup,
       includeWarmup: includeWarmup ?? this.includeWarmup,
       warmupPercent: warmupPercent ?? this.warmupPercent,
       notes: notes ?? this.notes,
@@ -336,7 +359,9 @@ class WorkoutSet {
     this.reps,
     this.weight,
     this.moves,
+    this.routeType,
     this.difficulty,
+    this.completedRoute = false,
     this.distance,
     this.notes = '',
   });
@@ -356,7 +381,9 @@ class WorkoutSet {
   final int? reps;
   final double? weight;
   final int? moves;
+  final String? routeType;
   final String? difficulty;
+  final bool completedRoute;
   final double? distance;
   final String notes;
 
@@ -382,7 +409,9 @@ class WorkoutSet {
         'reps': reps,
         'weight': weight,
         'moves': moves,
+        'route_type': routeType,
         'difficulty': difficulty,
+        'completed_route': completedRoute ? 1 : 0,
         'distance': distance,
         'notes': notes,
       };
@@ -406,7 +435,9 @@ class WorkoutSet {
         reps: map['reps'] as int?,
         weight: (map['weight'] as num?)?.toDouble(),
         moves: map['moves'] as int?,
+        routeType: map['route_type'] as String?,
         difficulty: map['difficulty'] as String?,
+        completedRoute: (map['completed_route'] as int? ?? 0) == 1,
         distance: (map['distance'] as num?)?.toDouble(),
         notes: map['notes'] as String? ?? '',
       );
@@ -427,7 +458,9 @@ class WorkoutSet {
     int? reps,
     double? weight,
     int? moves,
+    String? routeType,
     String? difficulty,
+    bool? completedRoute,
     double? distance,
     String? notes,
   }) {
@@ -447,7 +480,9 @@ class WorkoutSet {
       reps: reps ?? this.reps,
       weight: weight ?? this.weight,
       moves: moves ?? this.moves,
+      routeType: routeType ?? this.routeType,
       difficulty: difficulty ?? this.difficulty,
+      completedRoute: completedRoute ?? this.completedRoute,
       distance: distance ?? this.distance,
       notes: notes ?? this.notes,
     );
@@ -487,6 +522,8 @@ final metricDefinitions = <MetricDefinition>[
       (set) => set.movesPerMinute == 0 ? null : set.movesPerMinute),
   MetricDefinition('difficulty', 'Difficulty', 'grade',
       (set) => difficultyToNumber(set.difficulty)),
+  MetricDefinition('routeCompletion', 'Route completion', 'finished',
+      (set) => set.completedRoute ? 1 : 0),
   MetricDefinition('distance', 'Distance', 'distance', (set) => set.distance),
   MetricDefinition(
       'pace', 'Pace', 'sec/distance', (set) => set.pace == 0 ? null : set.pace),
@@ -501,9 +538,27 @@ MetricDefinition? metricDefinition(String key) {
 
 double? difficultyToNumber(String? value) {
   if (value == null || value.trim().isEmpty) return null;
-  final cleaned = value
-      .toUpperCase()
-      .replaceAll('V', '')
-      .replaceAll(RegExp(r'[^0-9.]'), '');
-  return double.tryParse(cleaned);
+  final cleaned = value.trim().toUpperCase();
+  final boulder = RegExp(r'^V\s*(\d+(?:\.\d+)?)').firstMatch(cleaned);
+  if (boulder != null) return double.tryParse(boulder.group(1)!);
+
+  final yosemite = RegExp(r'5\.(\d{1,2})([ABCD+-]?)').firstMatch(cleaned);
+  if (yosemite != null) {
+    final number = double.tryParse(yosemite.group(1)!);
+    if (number == null) return null;
+    final suffix = yosemite.group(2);
+    final offset = switch (suffix) {
+      'A' => 0.1,
+      'B' => 0.2,
+      'C' => 0.3,
+      'D' => 0.4,
+      '+' => 0.05,
+      '-' => -0.05,
+      _ => 0.0,
+    };
+    return number + offset;
+  }
+
+  final numeric = cleaned.replaceAll(RegExp(r'[^0-9.]'), '');
+  return double.tryParse(numeric);
 }

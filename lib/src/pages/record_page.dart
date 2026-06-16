@@ -87,7 +87,9 @@ class _RecordPageState extends State<RecordPage> {
       if (step.exercise.recordsReps) keys.add('reps');
       if (step.exercise.recordsWeight) keys.add('weight');
       if (step.exercise.recordsMoves) keys.add('moves');
+      if (step.exercise.recordsRouteType) keys.add('routeType');
       if (step.exercise.recordsDifficulty) keys.add('difficulty');
+      if (step.exercise.recordsRouteCompletion) keys.add('routeCompletion');
       if (step.exercise.recordsDistance) keys.add('distance');
     }
     return keys;
@@ -132,44 +134,76 @@ class _RecordPageState extends State<RecordPage> {
   List<_PlannedSet> _buildQueue(WorkoutPlan plan, List<WorkoutPlanStep> steps) {
     final queue = <_PlannedSet>[];
     var queueIndex = 0;
-    if (!plan.cycleExercises) {
-      for (final step in steps) {
-        if (step.item.includeWarmup) {
-          queue.add(_PlannedSet(
-              step: step,
-              queueIndex: queueIndex++,
-              setNumber: 0,
-              isWarmup: true));
-        }
-        for (var setNumber = 1; setNumber <= step.item.sets; setNumber++) {
-          queue.add(_PlannedSet(
-              step: step,
-              queueIndex: queueIndex++,
-              setNumber: setNumber,
-              isWarmup: false));
-        }
+    final hasStepGroups = steps.any((step) => step.item.cycleGroup > 0);
+    final effectiveSteps = plan.cycleExercises && !hasStepGroups
+        ? steps
+            .map((step) => WorkoutPlanStep(
+                  step.item.copyWith(cycleGroup: 1),
+                  step.exercise,
+                ))
+            .toList()
+        : steps;
+
+    void addStraight(WorkoutPlanStep step) {
+      if (step.item.includeWarmup) {
+        queue.add(_PlannedSet(
+            step: step,
+            queueIndex: queueIndex++,
+            setNumber: 0,
+            isWarmup: true));
       }
-      return queue;
+      for (var setNumber = 1; setNumber <= step.item.sets; setNumber++) {
+        queue.add(_PlannedSet(
+            step: step,
+            queueIndex: queueIndex++,
+            setNumber: setNumber,
+            isWarmup: false));
+      }
     }
 
-    final maxSets = steps.fold<int>(
-        0, (max, step) => step.item.sets > max ? step.item.sets : max);
-    for (var setNumber = 1; setNumber <= maxSets; setNumber++) {
-      for (final step in steps) {
-        if (setNumber == 1 && step.item.includeWarmup) {
-          queue.add(_PlannedSet(
-              step: step,
-              queueIndex: queueIndex++,
-              setNumber: 0,
-              isWarmup: true));
+    void addCycled(List<WorkoutPlanStep> group) {
+      final maxSets = group.fold<int>(
+          0, (max, step) => step.item.sets > max ? step.item.sets : max);
+      for (var setNumber = 1; setNumber <= maxSets; setNumber++) {
+        for (final step in group) {
+          if (setNumber == 1 && step.item.includeWarmup) {
+            queue.add(_PlannedSet(
+                step: step,
+                queueIndex: queueIndex++,
+                setNumber: 0,
+                isWarmup: true));
+          }
+          if (setNumber <= step.item.sets) {
+            queue.add(_PlannedSet(
+                step: step,
+                queueIndex: queueIndex++,
+                setNumber: setNumber,
+                isWarmup: false));
+          }
         }
-        if (setNumber <= step.item.sets) {
-          queue.add(_PlannedSet(
-              step: step,
-              queueIndex: queueIndex++,
-              setNumber: setNumber,
-              isWarmup: false));
-        }
+      }
+    }
+
+    var index = 0;
+    while (index < effectiveSteps.length) {
+      final step = effectiveSteps[index];
+      final groupId = step.item.cycleGroup;
+      if (groupId <= 0) {
+        addStraight(step);
+        index++;
+        continue;
+      }
+
+      final group = <WorkoutPlanStep>[];
+      while (index < effectiveSteps.length &&
+          effectiveSteps[index].item.cycleGroup == groupId) {
+        group.add(effectiveSteps[index]);
+        index++;
+      }
+      if (group.length == 1) {
+        addStraight(group.first);
+      } else {
+        addCycled(group);
       }
     }
     return queue;
@@ -260,7 +294,9 @@ class _RecordPageState extends State<RecordPage> {
       reps: entry.reps,
       weight: entry.weight,
       moves: entry.moves,
+      routeType: entry.routeType,
       difficulty: entry.difficulty,
+      completedRoute: entry.completedRoute,
       distance: entry.distance,
       notes: entry.notes,
     ));
