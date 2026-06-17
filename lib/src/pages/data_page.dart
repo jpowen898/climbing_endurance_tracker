@@ -17,6 +17,7 @@ class _DataPageState extends State<DataPage> {
   List<Exercise> _exercises = [];
   List<SetWithExercise> _sets = [];
   List<WorkoutSession> _sessions = [];
+  final Map<int, List<HeartRateSample>> _heartRateSamples = {};
   int? _exerciseId;
   DateTimeRange _dateRange = DateTimeRange(
     start: DateTime.now().subtract(const Duration(days: 30)),
@@ -33,11 +34,23 @@ class _DataPageState extends State<DataPage> {
     final exercises = await db.exercises();
     final sessions = await db.sessions();
     final sets = await db.allSets();
+    final heartRateSamples = <int, List<HeartRateSample>>{};
+    for (final session in sessions) {
+      if (session.id != null) {
+        final samples = await db.heartRateSamplesForSession(session.id!);
+        if (samples.isNotEmpty) {
+          heartRateSamples[session.id!] = samples;
+        }
+      }
+    }
     if (!mounted) return;
     setState(() {
       _exercises = exercises;
       _sessions = sessions;
       _sets = sets.reversed.toList();
+      _heartRateSamples
+        ..clear()
+        ..addAll(heartRateSamples);
     });
   }
 
@@ -71,6 +84,10 @@ class _DataPageState extends State<DataPage> {
         .toSet()
         .toList()
       ..sort();
+    final setsBySession = <int, List<SetWithExercise>>{};
+    for (final item in _sets) {
+      setsBySession.putIfAbsent(item.set.sessionId, () => []).add(item);
+    }
     final selectedExercise = _exerciseId == null
         ? null
         : firstWhereOrNull(
@@ -130,6 +147,23 @@ class _DataPageState extends State<DataPage> {
               );
               yield const SizedBox(height: 12);
             }),
+          ..._filteredSessions.expand((session) sync* {
+            final sessionId = session.id;
+            if (sessionId == null) return;
+            final samples =
+                _heartRateSamples[sessionId] ?? const <HeartRateSample>[];
+            if (samples.isEmpty) return;
+            yield ChartCard(
+              title:
+                  'Heart rate - ${session.name} ${shortDate.format(session.startedAt)}',
+              child: HeartRateWorkoutChart(
+                samples: samples,
+                sets: setsBySession[sessionId] ?? const <SetWithExercise>[],
+                sessionStart: session.startedAt,
+              ),
+            );
+            yield const SizedBox(height: 12);
+          }),
           if (selectedExercise != null &&
               selectedExercise.plotMetrics.isNotEmpty) ...[
             const SizedBox(height: 4),

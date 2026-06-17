@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:csv/csv.dart';
 
 import '../database.dart';
+import '../heart_rate_service.dart';
 import '../models.dart';
 import '../utils.dart';
 import '../widgets/dialogs.dart';
@@ -239,23 +241,21 @@ class _RawDataPageState extends State<RawDataPage> {
                 ?.copyWith(fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 12),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            alignment: WrapAlignment.spaceBetween,
             children: [
               Text('Sessions', style: Theme.of(context).textTheme.titleLarge),
-              Row(
-                children: [
-                  FilledButton.icon(
-                      onPressed: _addSession,
-                      icon: const Icon(Icons.add),
-                      label: const Text('Add session')),
-                  const SizedBox(width: 8),
-                  OutlinedButton.icon(
-                      onPressed: _importCsv,
-                      icon: const Icon(Icons.upload),
-                      label: const Text('Import CSV')),
-                ],
-              ),
+              FilledButton.icon(
+                  onPressed: _addSession,
+                  icon: const Icon(Icons.add),
+                  label: const Text('Add session')),
+              OutlinedButton.icon(
+                  onPressed: _importCsv,
+                  icon: const Icon(Icons.upload),
+                  label: const Text('Import CSV')),
             ],
           ),
           const SizedBox(height: 8),
@@ -286,6 +286,11 @@ class _RawDataPageState extends State<RawDataPage> {
                     mainAxisAlignment: MainAxisAlignment.end,
                     children: [
                       TextButton.icon(
+                          onPressed: () => _syncSessionHeartRate(session),
+                          icon: const Icon(Icons.favorite_outline),
+                          label: const Text('Sync HR')),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
                           onPressed: () => _editSession(session),
                           icon: const Icon(Icons.edit_outlined),
                           label: const Text('Edit session')),
@@ -302,6 +307,92 @@ class _RawDataPageState extends State<RawDataPage> {
           }),
         ],
       ),
+    );
+  }
+
+  Future<void> _syncSessionHeartRate(WorkoutSession session) async {
+    final sessionId = session.id;
+    if (sessionId == null) return;
+    final status = await HeartRateService.instance.healthConnectStatus();
+    if (status['available'] != true) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Health Connect is not available on this device')));
+      return;
+    }
+    final granted = status['permissionsGranted'] == true ||
+        await HeartRateService.instance.requestHealthConnectPermissions();
+    if (!granted) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Health Connect heart rate permission is required')));
+      return;
+    }
+    final sessionSets = await db.setsForSession(sessionId);
+    final window = _heartRateSyncWindow(session, sessionSets);
+    try {
+      final samples =
+          await HeartRateService.instance.readHealthConnectHeartRate(
+        start: window.start,
+        end: window.end,
+      );
+      for (final sample in samples) {
+        await db.insertHeartRateSample(HeartRateSample(
+          sessionId: sessionId,
+          recordedAt: sample.recordedAt,
+          bpm: sample.bpm,
+          accuracy: sample.accuracy,
+        ));
+      }
+      await db.recalculateHeartRateForSession(sessionId);
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Synced ${samples.length} HR samples from ${dateFormat.format(window.start)} to ${dateFormat.format(window.end)}')));
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      final message = error.message?.trim().isNotEmpty == true
+          ? error.message!
+          : error.code;
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Health Connect read failed: $message')));
+    }
+  }
+
+  _HeartRateSyncWindow _heartRateSyncWindow(
+      WorkoutSession session, List<WorkoutSet> sets) {
+    var start = session.startedAt;
+    var end = session.endedAt ?? session.startedAt;
+    var hasOpenSet = false;
+
+    for (final set in sets) {
+      if (set.startedAt.isBefore(start)) start = set.startedAt;
+
+      DateTime? setEnd;
+      if (set.endedAt != null) {
+        setEnd = set.endedAt;
+      } else if (set.setDurationSeconds > 0) {
+        setEnd = set.startedAt.add(Duration(seconds: set.setDurationSeconds));
+      } else {
+        hasOpenSet = true;
+      }
+
+      if (setEnd != null) {
+        final rest = set.restAfterSeconds;
+        if (rest != null && rest > 0) {
+          setEnd = setEnd.add(Duration(seconds: rest));
+        }
+        if (setEnd.isAfter(end)) end = setEnd;
+      }
+    }
+
+    if (hasOpenSet) end = DateTime.now();
+    if (end.isBefore(start)) end = start;
+
+    return _HeartRateSyncWindow(
+      start.subtract(const Duration(minutes: 1)),
+      end.add(const Duration(minutes: 1)),
     );
   }
 
@@ -563,4 +654,11 @@ class _CsvImportConfig {
   final String distanceColumns;
   final String durationColumns;
   final String restColumns;
+}
+
+class _HeartRateSyncWindow {
+  const _HeartRateSyncWindow(this.start, this.end);
+
+  final DateTime start;
+  final DateTime end;
 }

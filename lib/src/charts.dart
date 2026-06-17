@@ -311,3 +311,173 @@ class RestFalloffChart extends StatelessWidget {
     ));
   }
 }
+
+class HeartRateWorkoutChart extends StatelessWidget {
+  const HeartRateWorkoutChart({
+    super.key,
+    required this.samples,
+    required this.sets,
+    required this.sessionStart,
+  });
+
+  final List<HeartRateSample> samples;
+  final List<SetWithExercise> sets;
+  final DateTime sessionStart;
+
+  @override
+  Widget build(BuildContext context) {
+    if (samples.isEmpty) return const Center(child: Text('No heart rate data'));
+    final sortedSamples = [...samples]
+      ..sort((a, b) => a.recordedAt.compareTo(b.recordedAt));
+    final sortedSets = sets.where((item) => item.set.endedAt != null).toList()
+      ..sort((a, b) => a.set.startedAt.compareTo(b.set.startedAt));
+    final lastSample = sortedSamples.last.recordedAt;
+    final lastSetEnd = sortedSets.isEmpty
+        ? sessionStart
+        : sortedSets
+            .map((item) => item.set.endedAt!)
+            .reduce((a, b) => a.isAfter(b) ? a : b);
+    final end = lastSample.isAfter(lastSetEnd) ? lastSample : lastSetEnd;
+    final totalMinutes = end.difference(sessionStart).inSeconds / 60.0;
+    final maxX = totalMinutes <= 0 ? 1.0 : totalMinutes;
+    final spots = sortedSamples.map((sample) {
+      final minutes =
+          sample.recordedAt.difference(sessionStart).inSeconds / 60.0;
+      return FlSpot(minutes.clamp(0, maxX), sample.bpm);
+    }).toList();
+    final minHr = sortedSamples
+        .map((sample) => sample.bpm)
+        .reduce((a, b) => a < b ? a : b);
+    final maxHr = sortedSamples
+        .map((sample) => sample.bpm)
+        .reduce((a, b) => a > b ? a : b);
+    final colors = [
+      Theme.of(context).colorScheme.primary.withValues(alpha: 0.12),
+      Theme.of(context).colorScheme.secondary.withValues(alpha: 0.12),
+      Theme.of(context).colorScheme.tertiary.withValues(alpha: 0.12),
+      Colors.red.withValues(alpha: 0.10),
+      Colors.green.withValues(alpha: 0.10),
+      Colors.orange.withValues(alpha: 0.10),
+    ];
+
+    return LayoutBuilder(builder: (context, constraints) {
+      const leftAxis = 42.0;
+      final plotWidth =
+          (constraints.maxWidth - leftAxis).clamp(0.0, double.infinity);
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Stack(
+                children: [
+                  for (var i = 0; i < sortedSets.length; i++)
+                    _SetSectionBand(
+                      item: sortedSets[i],
+                      color: colors[i % colors.length],
+                      left: leftAxis +
+                          plotWidth *
+                              (sortedSets[i]
+                                      .set
+                                      .startedAt
+                                      .difference(sessionStart)
+                                      .inSeconds /
+                                  60.0 /
+                                  maxX),
+                      width: plotWidth *
+                          ((sortedSets[i]
+                                      .set
+                                      .endedAt!
+                                      .difference(sortedSets[i].set.startedAt)
+                                      .inSeconds /
+                                  60.0) /
+                              maxX),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          LineChart(
+            LineChartData(
+              minX: 0,
+              maxX: maxX,
+              minY: (minHr - 5).clamp(0, double.infinity).toDouble(),
+              maxY: maxHr + 5,
+              gridData: const FlGridData(show: true),
+              borderData: FlBorderData(show: false),
+              titlesData: FlTitlesData(
+                topTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                rightTitles:
+                    const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                leftTitles: const AxisTitles(
+                  axisNameWidget: Text('bpm'),
+                  sideTitles: SideTitles(showTitles: true, reservedSize: 42),
+                ),
+                bottomTitles: AxisTitles(
+                  axisNameWidget: const Text('minutes'),
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    reservedSize: 42,
+                    getTitlesWidget: (value, meta) {
+                      if (value < 0 || value > maxX) return const Text('');
+                      return Text(value.round().toString(),
+                          style: const TextStyle(fontSize: 10));
+                    },
+                  ),
+                ),
+              ),
+              lineBarsData: [
+                LineChartBarData(
+                  spots: spots,
+                  isCurved: false,
+                  barWidth: 3,
+                  dotData: const FlDotData(show: false),
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    });
+  }
+}
+
+class _SetSectionBand extends StatelessWidget {
+  const _SetSectionBand({
+    required this.item,
+    required this.color,
+    required this.left,
+    required this.width,
+  });
+
+  final SetWithExercise item;
+  final Color color;
+  final double left;
+  final double width;
+
+  @override
+  Widget build(BuildContext context) {
+    if (width <= 1) return const SizedBox.shrink();
+    return Positioned(
+      left: left,
+      top: 0,
+      bottom: 42,
+      width: width,
+      child: Container(
+        color: color,
+        alignment: Alignment.topCenter,
+        padding: const EdgeInsets.only(top: 4, left: 2, right: 2),
+        child: RotatedBox(
+          quarterTurns: width < 48 ? 1 : 0,
+          child: Text(
+            item.exercise.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
+    );
+  }
+}

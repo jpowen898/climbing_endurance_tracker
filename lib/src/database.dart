@@ -14,7 +14,7 @@ class ClimbDatabase {
     final path = p.join(await getDatabasesPath(), 'climb_endurance.sqlite');
     _db = await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onCreate: _create,
       onUpgrade: _upgrade,
       onOpen: (db) async {
@@ -95,9 +95,23 @@ class ClimbDatabase {
         difficulty TEXT,
         completed_route INTEGER NOT NULL DEFAULT 0,
         distance REAL,
+        hr_min REAL,
+        hr_max REAL,
+        hr_avg REAL,
         notes TEXT NOT NULL DEFAULT ''
       )
     ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS heart_rate_samples(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        recorded_at INTEGER NOT NULL,
+        bpm REAL NOT NULL,
+        accuracy INTEGER
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_hr_samples_session_time ON heart_rate_samples(session_id, recorded_at)');
   }
 
   Future<void> _upgrade(Database db, int oldVersion, int newVersion) async {
@@ -112,6 +126,9 @@ class ClimbDatabase {
     }
     if (oldVersion < 5) {
       await _upgradeToV5(db);
+    }
+    if (oldVersion < 6) {
+      await _upgradeToV6(db);
     }
   }
 
@@ -181,14 +198,14 @@ class ClimbDatabase {
           id, session_id, exercise_id, plan_item_id, sequence_index, set_number,
           is_warmup, started_at, ended_at, set_duration_seconds, rest_after_seconds,
           target_rest_seconds, reps, weight, moves, route_type, difficulty,
-          completed_route, distance, notes
+          completed_route, distance, hr_min, hr_max, hr_avg, notes
         )
         SELECT sets_legacy.id, sets_legacy.session_id,
                COALESCE(exercises.id, $fallbackExercise), NULL, 0, sets_legacy.set_number,
                0, sets_legacy.started_at, sets_legacy.ended_at, sets_legacy.wall_time_seconds,
                sets_legacy.rest_after_seconds, sets_legacy.target_rest_seconds,
                NULL, NULL, sets_legacy.moves_completed, NULL, NULL, 0, NULL,
-               sets_legacy.notes
+               NULL, NULL, NULL, sets_legacy.notes
         FROM sets_legacy
         LEFT JOIN exercises ON exercises.id = sets_legacy.route_id
       ''');
@@ -220,6 +237,25 @@ class ClimbDatabase {
           'ALTER TABLE sets ADD COLUMN completed_route INTEGER NOT NULL DEFAULT 0');
     }
     await _seedDefaults(db);
+  }
+
+  Future<void> _upgradeToV6(Database db) async {
+    for (final column in ['hr_min', 'hr_max', 'hr_avg']) {
+      if (!await _columnExists(db, 'sets', column)) {
+        await db.execute('ALTER TABLE sets ADD COLUMN $column REAL');
+      }
+    }
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS heart_rate_samples(
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        recorded_at INTEGER NOT NULL,
+        bpm REAL NOT NULL,
+        accuracy INTEGER
+      )
+    ''');
+    await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_hr_samples_session_time ON heart_rate_samples(session_id, recorded_at)');
   }
 
   Future<bool> _columnExists(
@@ -464,6 +500,81 @@ class ClimbDatabase {
   Future<void> updateRestAfter(int setId, int seconds) async {
     await (await db).update('sets', {'rest_after_seconds': seconds},
         where: 'id = ?', whereArgs: [setId]);
+  }
+
+  Future<int> insertHeartRateSample(HeartRateSample sample) async {
+    final database = await db;
+    final existing = await database.query(
+      'heart_rate_samples',
+      columns: ['id'],
+      where: 'session_id = ? AND recorded_at = ? AND bpm = ?',
+      whereArgs: [
+        sample.sessionId,
+        sample.recordedAt.millisecondsSinceEpoch,
+        sample.bpm,
+      ],
+      limit: 1,
+    );
+    if (existing.isNotEmpty) return existing.first['id'] as int;
+    return database.insert('heart_rate_samples', sample.toMap());
+  }
+
+  Future<List<HeartRateSample>> heartRateSamplesForSession(
+      int sessionId) async {
+    final rows = await (await db).query(
+      'heart_rate_samples',
+      where: 'session_id = ?',
+      whereArgs: [sessionId],
+      orderBy: 'recorded_at ASC, id ASC',
+    );
+    return rows.map(HeartRateSample.fromMap).toList();
+  }
+
+  Future<HeartRateStats?> heartRateStatsForSet(WorkoutSet set) async {
+    final end = set.endedAt;
+    if (end == null) return null;
+    final rows = await (await db).rawQuery('''
+      SELECT MIN(bpm) AS hr_min, MAX(bpm) AS hr_max, AVG(bpm) AS hr_avg
+      FROM heart_rate_samples
+      WHERE session_id = ? AND recorded_at >= ? AND recorded_at <= ?
+    ''', [
+      set.sessionId,
+      set.startedAt.millisecondsSinceEpoch,
+      end.millisecondsSinceEpoch,
+    ]);
+    if (rows.isEmpty || rows.first['hr_avg'] == null) return null;
+    return HeartRateStats(
+      min: (rows.first['hr_min'] as num).toDouble(),
+      max: (rows.first['hr_max'] as num).toDouble(),
+      avg: (rows.first['hr_avg'] as num).toDouble(),
+    );
+  }
+
+  Future<void> recalculateHeartRateForSet(int setId) async {
+    final rows = await (await db)
+        .query('sets', where: 'id = ?', whereArgs: [setId], limit: 1);
+    if (rows.isEmpty) return;
+    final set = WorkoutSet.fromMap(rows.first);
+    final stats = await heartRateStatsForSet(set);
+    await (await db).update(
+      'sets',
+      {
+        'hr_min': stats?.min,
+        'hr_max': stats?.max,
+        'hr_avg': stats?.avg,
+      },
+      where: 'id = ?',
+      whereArgs: [setId],
+    );
+  }
+
+  Future<void> recalculateHeartRateForSession(int sessionId) async {
+    final sets = await setsForSession(sessionId);
+    for (final set in sets) {
+      if (set.id != null) {
+        await recalculateHeartRateForSet(set.id!);
+      }
+    }
   }
 
   Future<void> deleteSet(int id) async {

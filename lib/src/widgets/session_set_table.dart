@@ -125,6 +125,18 @@ class _HeaderRow extends StatelessWidget {
           const SizedBox(width: 12),
           _header('Distance', 92)
         ],
+        if (_showMetric('hrMin')) ...[
+          const SizedBox(width: 12),
+          _header('HR min', 80)
+        ],
+        if (_showMetric('hrAvg')) ...[
+          const SizedBox(width: 12),
+          _header('HR avg', 80)
+        ],
+        if (_showMetric('hrMax')) ...[
+          const SizedBox(width: 12),
+          _header('HR max', 80)
+        ],
         const SizedBox(width: 12),
         const SizedBox(width: 48, child: Text('')),
       ],
@@ -270,6 +282,9 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
       distance: distanceController.text.trim().isEmpty
           ? null
           : double.tryParse(distanceController.text),
+      hrMin: widget.set.hrMin,
+      hrMax: widget.set.hrMax,
+      hrAvg: widget.set.hrAvg,
       notes: widget.set.notes,
     ));
   }
@@ -357,6 +372,18 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
           _cell(distanceController, focusNodes[7], TextInputType.number,
               exercise?.recordsDistance == true ? '' : '-'),
         ],
+        if (_showMetric('hrMin')) ...[
+          const SizedBox(width: 12),
+          _readOnlyCell(widget.set.hrMin),
+        ],
+        if (_showMetric('hrAvg')) ...[
+          const SizedBox(width: 12),
+          _readOnlyCell(widget.set.hrAvg),
+        ],
+        if (_showMetric('hrMax')) ...[
+          const SizedBox(width: 12),
+          _readOnlyCell(widget.set.hrMax),
+        ],
         const SizedBox(width: 12),
         SizedBox(
           width: 48,
@@ -367,6 +394,16 @@ class _EditableWorkoutSetRowState extends State<EditableWorkoutSetRow> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _readOnlyCell(double? value) {
+    return SizedBox(
+      width: 80,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Text(value == null ? '-' : value.round().toString()),
+      ),
     );
   }
 

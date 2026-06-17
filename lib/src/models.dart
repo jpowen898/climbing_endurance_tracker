@@ -30,24 +30,25 @@ extension ExerciseKindDetails on ExerciseKind {
   List<String> get defaultMetrics {
     switch (this) {
       case ExerciseKind.strength:
-        return ['reps', 'weight', 'volume', 'duration', 'rest'];
+        return ['reps', 'weight', 'volume', 'hrAvg', 'duration', 'rest'];
       case ExerciseKind.calisthenic:
-        return ['reps', 'duration', 'rest'];
+        return ['reps', 'hrAvg', 'duration', 'rest'];
       case ExerciseKind.climbing:
         return [
           'moves',
           'difficulty',
           'routeCompletion',
           'movesPerMinute',
+          'hrAvg',
           'duration',
           'rest',
         ];
       case ExerciseKind.aerobic:
-        return ['distance', 'duration', 'pace', 'rest'];
+        return ['distance', 'duration', 'pace', 'hrAvg', 'hrMax', 'rest'];
       case ExerciseKind.isometric:
-        return ['duration', 'rest'];
+        return ['duration', 'hrAvg', 'rest'];
       case ExerciseKind.custom:
-        return ['duration', 'rest'];
+        return ['duration', 'hrAvg', 'rest'];
     }
   }
 }
@@ -158,7 +159,8 @@ class WorkoutPlan {
   final bool cycleExercises;
   final DateTime createdAt;
 
-  String get orderLabel => cycleExercises ? 'Cycle all exercises' : 'Mixed order';
+  String get orderLabel =>
+      cycleExercises ? 'Cycle all exercises' : 'Mixed order';
 
   Map<String, Object?> toMap() => {
         'id': id,
@@ -363,6 +365,9 @@ class WorkoutSet {
     this.difficulty,
     this.completedRoute = false,
     this.distance,
+    this.hrMin,
+    this.hrMax,
+    this.hrAvg,
     this.notes = '',
   });
 
@@ -385,6 +390,9 @@ class WorkoutSet {
   final String? difficulty;
   final bool completedRoute;
   final double? distance;
+  final double? hrMin;
+  final double? hrMax;
+  final double? hrAvg;
   final String notes;
 
   double get movesPerMinute =>
@@ -413,6 +421,9 @@ class WorkoutSet {
         'difficulty': difficulty,
         'completed_route': completedRoute ? 1 : 0,
         'distance': distance,
+        'hr_min': hrMin,
+        'hr_max': hrMax,
+        'hr_avg': hrAvg,
         'notes': notes,
       };
 
@@ -439,6 +450,9 @@ class WorkoutSet {
         difficulty: map['difficulty'] as String?,
         completedRoute: (map['completed_route'] as int? ?? 0) == 1,
         distance: (map['distance'] as num?)?.toDouble(),
+        hrMin: (map['hr_min'] as num?)?.toDouble(),
+        hrMax: (map['hr_max'] as num?)?.toDouble(),
+        hrAvg: (map['hr_avg'] as num?)?.toDouble(),
         notes: map['notes'] as String? ?? '',
       );
 
@@ -462,6 +476,9 @@ class WorkoutSet {
     String? difficulty,
     bool? completedRoute,
     double? distance,
+    double? hrMin,
+    double? hrMax,
+    double? hrAvg,
     String? notes,
   }) {
     return WorkoutSet(
@@ -484,9 +501,57 @@ class WorkoutSet {
       difficulty: difficulty ?? this.difficulty,
       completedRoute: completedRoute ?? this.completedRoute,
       distance: distance ?? this.distance,
+      hrMin: hrMin ?? this.hrMin,
+      hrMax: hrMax ?? this.hrMax,
+      hrAvg: hrAvg ?? this.hrAvg,
       notes: notes ?? this.notes,
     );
   }
+}
+
+class HeartRateSample {
+  HeartRateSample({
+    this.id,
+    required this.sessionId,
+    required this.recordedAt,
+    required this.bpm,
+    this.accuracy,
+  });
+
+  final int? id;
+  final int sessionId;
+  final DateTime recordedAt;
+  final double bpm;
+  final int? accuracy;
+
+  Map<String, Object?> toMap() => {
+        'id': id,
+        'session_id': sessionId,
+        'recorded_at': recordedAt.millisecondsSinceEpoch,
+        'bpm': bpm,
+        'accuracy': accuracy,
+      };
+
+  static HeartRateSample fromMap(Map<String, Object?> map) => HeartRateSample(
+        id: map['id'] as int?,
+        sessionId: map['session_id'] as int,
+        recordedAt:
+            DateTime.fromMillisecondsSinceEpoch(map['recorded_at'] as int),
+        bpm: (map['bpm'] as num).toDouble(),
+        accuracy: map['accuracy'] as int?,
+      );
+}
+
+class HeartRateStats {
+  const HeartRateStats({
+    required this.min,
+    required this.max,
+    required this.avg,
+  });
+
+  final double min;
+  final double max;
+  final double avg;
 }
 
 class SetWithExercise {
@@ -527,6 +592,9 @@ final metricDefinitions = <MetricDefinition>[
   MetricDefinition('distance', 'Distance', 'distance', (set) => set.distance),
   MetricDefinition(
       'pace', 'Pace', 'sec/distance', (set) => set.pace == 0 ? null : set.pace),
+  MetricDefinition('hrMin', 'HR min', 'bpm', (set) => set.hrMin),
+  MetricDefinition('hrAvg', 'HR average', 'bpm', (set) => set.hrAvg),
+  MetricDefinition('hrMax', 'HR max', 'bpm', (set) => set.hrMax),
 ];
 
 MetricDefinition? metricDefinition(String key) {
